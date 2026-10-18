@@ -76,15 +76,47 @@ export async function generateQwenImageClientSide(params: QwenClientParams): Pro
       const client = await Client.connect(host, clientOptions);
       onStatusUpdate?.("Terhubung! Mengirim tugas edit gambar ke ZeroGPU...");
 
-      const response = await client.predict('/edit', {
-        prompt: prompt,
-        input_image: baseBlob,
-        extra_images: [extraBlob, ...extraBlobs].filter(Boolean),
-        steps: steps,
-        seed: seed,
-        randomize_seed: randomize_seed,
-        lora_scale: lora_scale,
-      });
+      let endpoint = '/infer';
+      let payload: any = {};
+
+      if (spaceUrl.includes('bennie2390/Qwen-Image-Edit-Rapid-AIO-Loras-Experimental')) {
+        endpoint = '/infer';
+        payload = {
+          input_image_1: baseBlob,
+          input_image_2: null,
+          input_images_extra: extraBlobs.map(b => ({ image: b })),
+          prompt: prompt,
+          lora_adapter: 'None',
+          seed: seed,
+          randomize_seed: randomize_seed,
+          guidance_scale: 1.0,
+          steps: steps,
+          target_megapixels: 1.0,
+          extras_condition_only: true,
+          pad_to_canvas: true,
+          vae_tiling: false,
+          resolution_multiple: 32,
+          vae_ref_megapixels: 0.0,
+          decoder_vae: 'qwen',
+          keep_decoder_2x: false,
+          highlight_protection: true,
+          highlight_protection_strength: 0.35,
+        };
+      } else {
+        // Fallback/Default for FelyaHuhing/qwen-image-21-uncensored
+        endpoint = '/edit';
+        payload = {
+          prompt: prompt,
+          input_image: baseBlob,
+          extra_images: extraBlobs.map(b => ({ image: b })),
+          steps: steps,
+          seed: seed,
+          randomize_seed: randomize_seed,
+          lora_scale: lora_scale,
+        };
+      }
+
+      const response = await client.predict(endpoint, payload);
 
       const outputData = response.data as any[];
       if (!outputData || outputData.length === 0) {

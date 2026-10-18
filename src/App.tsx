@@ -1179,6 +1179,7 @@ export default function App() {
                         className="w-full accent-purple-500 cursor-pointer mt-2"
                       />
                     </div>
+                    {editSpace !== 'bennie2390/Qwen-Image-Edit-Rapid-AIO-Loras-Experimental' && (
                     <div>
                       <label className="text-xs font-semibold text-slate-300 mb-1.5 block">LoRA Scale ({editLoraScale})</label>
                       <input
@@ -1191,6 +1192,7 @@ export default function App() {
                         className="w-full accent-purple-500 cursor-pointer mt-2"
                       />
                     </div>
+                    )}
                   </div>
 
                   <button
