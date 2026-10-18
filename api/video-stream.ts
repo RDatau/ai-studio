@@ -77,8 +77,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
 
           console.log('Fetching generated video from URL:', videoUrl);
-          // Fetch the video and convert to base64
-          const videoBlob = await fetch(videoUrl).then(r => r.blob());
+          // Fetch the video with authorization header if token is present
+          const videoRes = await fetch(videoUrl, {
+            headers: token.trim() ? { 'Authorization': `Bearer ${token.trim()}` } : {}
+          });
+          if (!videoRes.ok) {
+            throw new Error(`Failed to fetch video file from space: ${videoRes.status} ${videoRes.statusText}`);
+          }
+          const videoBlob = await videoRes.blob();
           const arrayBuffer = await videoBlob.arrayBuffer();
           const base64Video = Buffer.from(arrayBuffer).toString('base64');
           const dataUrl = `data:video/mp4;base64,${base64Video}`;
