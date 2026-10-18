@@ -29,7 +29,7 @@ async function getGradioClient(token?: string) {
   if (token && token.trim().length > 0) {
     options.token = token.trim();
   }
-  return await Client.connect(SPACE_URL, options as any);
+  return await Client.connect(SPACE_URL, { ...options, fetch: proxyFetch } as any);
 }
 
 app.post('/api/test-token', async (req, res) => {
@@ -107,7 +107,7 @@ async function executeWithTokenRotationForSpace<T>(
     const masked = currentToken ? `${currentToken.substring(0, 4)}...${currentToken.slice(-4)}` : 'Anonymous (No Token)';
     try {
       onStatus?.(`Connecting to Space ${spaceUrl} (Token #${i + 1}/${tokenList.length} [${masked}])...`);
-      const client = await Client.connect(spaceUrl, { timeout: 300000, ...(currentToken ? { hf_token: currentToken.trim() } : {}) } as any);
+      const client = await Client.connect(spaceUrl, { timeout: 300000, ...(currentToken ? { hf_token: currentToken.trim() } : {}), fetch: proxyFetch } as any);
       onStatus?.(`Generating using ZeroGPU (Token #${i + 1})...`);
       const result = await fn(client, spaceUrl, currentToken);
       onStatus?.(`Generation successful with Token #${i + 1}!`);
@@ -144,7 +144,8 @@ app.post('/api/generate-stream', async (req, res) => {
     }
 
     send({ status: 'Preparing data payload...' });
-    const tokenArray: string[] = Array.isArray(tokens) ? tokens : (tokens ? [tokens] : []);
+    const envTokens = process.env.HF_TOKENS ? process.env.HF_TOKENS.split(/[\r\n,;\s]+/).map(t => t.trim()).filter(Boolean) : [];
+    const tokenArray: string[] = [...(Array.isArray(tokens) ? tokens : (tokens ? [tokens] : [])), ...envTokens];
 
     let width = 1024;
     let height = 1024;
@@ -241,7 +242,8 @@ app.post('/api/edit-stream', async (req, res) => {
       caption: null
     }));
 
-    const tokenArray: string[] = Array.isArray(tokens) ? tokens : (tokens ? [tokens] : []);
+    const envTokens = process.env.HF_TOKENS ? process.env.HF_TOKENS.split(/[\r\n,;\s]+/).map(t => t.trim()).filter(Boolean) : [];
+    const tokenArray: string[] = [...(Array.isArray(tokens) ? tokens : (tokens ? [tokens] : [])), ...envTokens];
 
     const { result, usedToken } = await executeWithTokenRotationForSpace(
       tokenArray,
@@ -354,7 +356,8 @@ app.post('/api/video-stream', async (req, res) => {
 
     send({ status: 'Preparing starting frame & pushing to Hugging Face...' });
     const imageBlob = await fetch(image_data).then(r => r.blob());
-    const tokenArray: string[] = Array.isArray(tokens) ? tokens : (tokens ? [tokens] : []);
+    const envTokens = process.env.HF_TOKENS ? process.env.HF_TOKENS.split(/[\r\n,;\s]+/).map(t => t.trim()).filter(Boolean) : [];
+    const tokenArray: string[] = [...(Array.isArray(tokens) ? tokens : (tokens ? [tokens] : [])), ...envTokens];
 
     const { result, usedToken } = await executeWithTokenRotationForSpace(
       tokenArray,
@@ -486,14 +489,34 @@ app.post('/api/video-stream', async (req, res) => {
   }
 });
 
+// Gemini Key helpers mirroring Lumina
+export const parseGeminiApiKeys = (input?: string): string[] => {
+  if (!input) return [];
+  return input
+    .split(/[\r\n,;\s]+/)
+    .map(k => k.trim()
+      .replace(/^(?:GEMINI_API_KEY|API_KEY|KEY)\s*[:=]\s*/i, '')
+      .replace(/^["']|["']$/g, '')
+      .trim()
+    )
+    .filter(k => k.length > 10);
+};
+
+export const getAllGeminiApiKeys = (pastedKeys?: string): string[] => {
+  const envKey = process.env.GEMINI_API_KEY || '';
+  const combined = [pastedKeys || '', envKey].join('\n');
+  const parsed = parseGeminiApiKeys(combined);
+  return Array.from(new Set(parsed));
+};
+
 // AI Prompt Enhancer endpoint with Gemini API Key rotation (cycling)
 app.post('/api/enhance-prompt', async (req, res) => {
   try {
     const { prompt, keys } = req.body;
-    const keyList = Array.isArray(keys) ? keys : (typeof keys === 'string' ? keys.split('\n').map((k: string) => k.trim()).filter(Boolean) : []);
+    const keyList = getAllGeminiApiKeys(keys);
 
     if (keyList.length === 0) {
-      return res.status(400).json({ success: false, error: 'No Gemini API keys provided. Please add your Gemini API Key in Settings.' });
+      return res.status(400).json({ success: false, error: 'No Gemini API keys provided (Paste in Settings or set GEMINI_API_KEY env var).' });
     }
 
     // Start from the last working index, wrapping around
@@ -519,8 +542,6 @@ app.post('/api/enhance-prompt', async (req, res) => {
         return res.json({ enhanced, usedKeyIndex: i + 1 });
       } catch (err: any) {
         console.error(`Gemini API key #${i + 1} failed:`, err.message || err);
-        if (err.stack) console.error('Stack trace:', err.stack);
-        // Continue to the next attempt even if this key failed
       }
     }
 
@@ -570,6 +591,20 @@ app.post('/api/validate-gemini-key', async (req, res) => {
 });
 
 // HF Proxy endpoint for bypassing CORS and network restrictions
+export const proxyFetch = async (targetUrl: string, init?: RequestInit): Promise<Response> => {
+  if (targetUrl.startsWith('data:')) {
+    return await fetch(targetUrl, init);
+  }
+
+  // If already a proxy URL, just fetch
+  if (targetUrl.includes('/api/hf-proxy')) {
+    return await fetch(targetUrl, init);
+  }
+
+  const proxyUrl = `/api/hf-proxy?url=${encodeURIComponent(targetUrl)}`;
+  return await fetch(proxyUrl, init);
+};
+
 app.all('/api/hf-proxy', async (req, res) => {
   try {
     const targetUrl = (req.query.url as string) || (req.body?.url as string);
