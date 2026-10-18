@@ -3,7 +3,8 @@
 /* Universal Minimalist Scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(147, 51, 234, 0.4) rgba(15, 23, 42, 0.6);
+  /* Transparan track */
+  scrollbar-color: rgba(147, 51, 234, 0.4) transparent;
 }
 
 ::-webkit-scrollbar {
@@ -12,7 +13,8 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
+  /* Membuat background track transparan */
+  background: transparent;
   border-radius: 9999px;
 }
 
@@ -24,4 +26,18 @@
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(168, 85, 247, 0.8);
+}
+
+/* Styling Dropdown agar transparan dan minimalis */
+select {
+  appearance: none;
+  background-color: transparent !important;
+  border: 1px solid rgba(71, 85, 105, 0.5) !important;
+  color: white !important;
+  padding-right: 2rem !important;
+}
+
+select option {
+  background-color: #0f172a !important; /* Warna gelap agar kontras */
+  color: white !important;
 }
