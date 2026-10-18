@@ -56,7 +56,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       throw new Error('All tokens failed');
     } catch (e: any) {
-      send({ success: false, error: e.message });
+      console.error('Video generation error:', e);
+      send({ success: false, error: e.message || 'Failed to generate video' });
       res.end();
     }
   }
