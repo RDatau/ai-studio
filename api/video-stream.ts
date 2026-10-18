@@ -45,6 +45,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             seed: Number(req.body.seed ?? -1),
             randomize_seed: Boolean(req.body.seed == -1 || req.body.randomize_seed),
             prompt_segments: req.body.prompt_segments || "",
+            scene_chain_prompt: req.body.scene_chain_prompt || "",
+            scene_chain_enabled: req.body.scene_chain_enabled || false,
             // ... (keeping other parameters at default or as in server.ts if needed)
           });
           
