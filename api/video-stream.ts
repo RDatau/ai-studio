@@ -4,8 +4,9 @@ import { Client } from '@gradio/client';
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).send('Method not allowed');
   
-    const tokenList = Array.isArray(tokens) ? tokens : (tokens ? [tokens] : ['']);
-    const startIndex = (Number(req.body.lastWorkingIndex) || 0) % tokenList.length;
+  const { prompt, image_data, tokens } = req.body;
+  const tokenList = Array.isArray(tokens) ? tokens : (tokens ? [tokens] : ['']);
+  const startIndex = (Number(req.body.lastWorkingIndex) || 0) % tokenList.length;
   
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -18,14 +19,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   
       for (let attempt = 0; attempt < tokenList.length; attempt++) {
         const i = (startIndex + attempt) % tokenList.length;
-        const token = tokenList[i];
-        try {
-          const client = await Client.connect('rdata92/LTX-2.3-10Eros', {
-            timeout: 300000,
-            ...(token.trim() ? { hf_token: token.trim() } : {})
-          } as any);
-          
-          const response = await client.predict('/generate', {
+          const token = tokenList[i];
+          console.log(`Attempting video generation with token #${i} (starts with ${token.substring(0, 4)}...)`);
+          try {
+            const client = await Client.connect('rdata92/LTX-2.3-10Eros', {
+              timeout: 300000,
+              ...(token.trim() ? { hf_token: token.trim() } : {})
+            } as any);
+            console.log(`Successfully connected to space with token #${i}`);
+            
+            const response = await client.predict('/generate', {
             image_path: imageBlob,
             prompt: prompt,
             negative_prompt: req.body.negative_prompt || "captions, music, transition, VR, bad quality, subtitles, text, watermark, overlay effects, cartoon, childish, ugly, text, blur, logo, static, low quality, noise, mutant, horror, film grain",
