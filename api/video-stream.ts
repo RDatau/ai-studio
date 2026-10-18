@@ -55,8 +55,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
           
           const outputData = response.data as any[];
-          const videoUrl = outputData[0]?.url || outputData[0]?.path;
+          console.log('Video generation raw response data length:', outputData?.length);
           
+          let videoUrl = '';
+          let usedSeed = req.body.seed;
+
+          if (Array.isArray(outputData)) {
+            const vidObj = outputData[0];
+            if (vidObj && vidObj.url) {
+              videoUrl = vidObj.url;
+            } else if (vidObj && vidObj.path) {
+              videoUrl = vidObj.path;
+            }
+            if (outputData.length > 2) {
+              usedSeed = outputData[2];
+            }
+          }
+
+          if (!videoUrl) {
+            throw new Error('Video URL not found in Space response output.');
+          }
+
+          console.log('Fetching generated video from URL:', videoUrl);
           // Fetch the video and convert to base64
           const videoBlob = await fetch(videoUrl).then(r => r.blob());
           const arrayBuffer = await videoBlob.arrayBuffer();
@@ -66,11 +86,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           send({ 
             success: true, 
             videoUrl: dataUrl,
-            seed: outputData.length > 2 ? outputData[2] : req.body.seed,
+            seed: usedSeed,
             usedIndex: i
           });
           return res.end();
-        } catch (e) { continue; }
+        } catch (e: any) { 
+          console.error(`Attempt with token #${i} failed with error:`, e.message || e);
+          continue; 
+        }
       }
       throw new Error('All tokens failed');
     } catch (e: any) {
