@@ -484,7 +484,6 @@ app.post('/api/enhance-prompt', async (req, res) => {
       const i = (startIdx + attempt) % keyList.length;
       const apiKey = keyList[i];
       try {
-        console.log(`Attempting prompt enhancement with Gemini API key #${i + 1}/${keyList.length}`);
         const aiInstance = new GoogleGenAI({ apiKey });
         const response = await aiInstance.models.generateContent({
           model: 'gemini-3.1-flash-lite',
@@ -506,12 +505,13 @@ app.post('/api/enhance-prompt', async (req, res) => {
         
         return res.json({ enhanced, usedKeyIndex: i + 1 });
       } catch (err: any) {
-        console.error(`Gemini API key #${i + 1} failed:`, err);
-        continue; // Try next Gemini key
+        console.error(`Gemini API key #${i + 1} failed:`, err.message || err);
+        // Continue to the next attempt even if this key failed
       }
     }
 
-    return res.status(500).json({ success: false, error: 'All configured Gemini API keys failed or hit rate limits.' });
+    console.error('All configured Gemini API keys failed.');
+    return res.status(500).json({ success: false, error: 'All Gemini keys failed.' });
   } catch (err: any) {
     console.error('Prompt enhancement error:', err);
     res.status(500).json({ success: false, error: err.message || 'Prompt enhancement failed' });
