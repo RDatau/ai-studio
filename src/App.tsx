@@ -25,6 +25,7 @@ import {
   Film,
   Video
 } from 'lucide-react';
+import { PWAInstallButton } from './components/PWAInstallButton';
 
 interface GenerationHistoryItem {
   id: string;
@@ -729,6 +730,7 @@ export default function App() {
         </div>
 
         <div className="flex items-center space-x-3">
+          <PWAInstallButton />
           <button
             onClick={() => setActiveTab('generate')}
             className={`px-3.5 py-2 rounded-xl border flex items-center space-x-2 text-sm font-medium transition ${
