@@ -313,7 +313,7 @@ export default function App() {
     }
   };
 
-  // Generate Image with client-side status
+  // Generate Image with server-side stream status
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       alert('Please enter a prompt.');
@@ -324,30 +324,56 @@ export default function App() {
 
     try {
       const tokens = getTokensArray();
-      const lastWorkingIndex = Number(localStorage.getItem('qwen_gen_last_working_index') || 0);
-
-      const result = await generateQwenImageClientSide({
-        prompt,
-        size,
-        steps,
-        seed,
-        randomize_seed: randomizeSeed,
-        lora_scale: loraScale,
-        tokens,
-        lastWorkingIndex,
-        onStatusUpdate: (status) => setLoadingMessage(status)
+      const res = await fetch('/api/generate-stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          size,
+          steps,
+          seed,
+          randomize_seed: randomizeSeed,
+          lora_scale: loraScale,
+          tokens
+        })
       });
 
-      if (result.usedIndex !== undefined) {
-        localStorage.setItem('qwen_gen_last_working_index', result.usedIndex.toString());
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let finalData: any = null;
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.substring(6));
+                if (data.status) {
+                  setLoadingMessage(data.status);
+                }
+                if (data.success !== undefined) {
+                  finalData = data;
+                }
+              } catch (e) {}
+            }
+          }
+        }
       }
 
-      const pngBase64 = await convertToPngBase64(result.imageUrl);
+      if (!finalData || !finalData.success) {
+        throw new Error(finalData?.error || 'Image generation failed');
+      }
+
+      const pngBase64 = await convertToPngBase64(finalData.imageUrl);
 
       const resultObj = {
         imageUrl: pngBase64,
-        seed: seed,
-        usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
+        seed: finalData.seed || seed,
+        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
       };
       setCurrentResult(resultObj);
 
@@ -356,12 +382,12 @@ export default function App() {
         type: 'generate',
         imageUrl: pngBase64,
         prompt,
-        seed: seed,
+        seed: finalData.seed || seed,
         steps,
         loraScale,
         size,
         timestamp: new Date().toISOString(),
-        usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
+        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
       };
       
       const { addHistoryItem } = await import('./utils/db');
@@ -471,7 +497,7 @@ export default function App() {
     }
   };
 
-  // Generate Video (LTX 2.3) with real-time stream status
+  // Generate Video (LTX 2.3) with server-side stream status
   const handleVideoGenerate = async () => {
     if (!vidPrompt.trim()) {
       alert('Please enter a prompt for video generation.');
@@ -487,37 +513,69 @@ export default function App() {
 
     try {
       const tokens = getTokensArray();
-      const lastWorkingIndex = Number(localStorage.getItem('video_token_last_working_index') || 0);
-
-      const result = await generateLtxVideoClientSide({
-        startImage: vidImage,
-        prompt: vidPrompt,
-        duration: vidSeconds || 4.0,
-        spaceUrl: userProfile?.hfVideoSpaceUrl || 'https://huggingface.co/spaces/rdata92/LTX-2.3-10Eros',
-        tokens,
-        lastWorkingIndex,
-        onStatusUpdate: (status) => setLoadingMessage(status)
+      const res = await fetch('/api/video-stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_data: vidImage,
+          prompt: vidPrompt,
+          negative_prompt: vidNegative,
+          preset: vidPreset,
+          seconds: vidSeconds,
+          max_width: vidMaxWidth,
+          max_height: vidMaxHeight,
+          mode: vidMode,
+          seed: vidSeed,
+          randomize_seed: vidRandomize,
+          tokens
+        })
       });
 
-      if (result.usedIndex !== undefined) {
-        localStorage.setItem('video_token_last_working_index', result.usedIndex.toString());
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let finalData: any = null;
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.substring(6));
+                if (data.status) {
+                  setLoadingMessage(data.status);
+                }
+                if (data.success !== undefined) {
+                  finalData = data;
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      }
+
+      if (!finalData || !finalData.success) {
+        throw new Error(finalData?.error || 'Video generation failed');
       }
 
       const resultObj = {
-        videoUrl: result.videoUrl,
-        seed: vidSeed || -1,
-        usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
+        videoUrl: finalData.videoUrl,
+        seed: finalData.seed || vidSeed || -1,
+        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
       };
       setCurrentVideoResult(resultObj);
 
       const historyItem: GenerationHistoryItem = {
         id: Math.random().toString(36).substring(2, 9),
         type: 'video',
-        videoUrl: result.videoUrl,
+        videoUrl: finalData.videoUrl,
         prompt: vidPrompt,
-        seed: vidSeed || -1,
+        seed: finalData.seed || vidSeed || -1,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
+        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
       };
       setHistory(prev => [historyItem, ...prev]);
     } catch (err: any) {
