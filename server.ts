@@ -17,8 +17,12 @@ app.use(express.json({ limit: '50mb' }));
 
 
 
+async function getGradioClient(token?: string) {
+  const options: any = {
+    timeout: 300000
+  };
   if (token && token.trim().length > 0) {
-    options.token = token.trim();
+    options.hf_token = token.trim();
   }
   return await Client.connect(SPACE_URL, options as any);
 }
@@ -531,7 +535,7 @@ async function startServer() {
     });
   }
 
-  const PORT = Number(process.env.PORT) || 3000;
+  const PORT = 3000;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });

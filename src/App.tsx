@@ -282,10 +282,12 @@ export default function App() {
     setIsEnhancing(true);
     try {
       const keys = geminiKeyInputText.split('\n').map(l => l.trim()).filter(Boolean);
+      const lastWorkingIndex = localStorage.getItem('gemini_last_working_index') || 0;
+      
       const res = await fetch('/api/enhance-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: targetPrompt, keys })
+        body: JSON.stringify({ prompt: targetPrompt, keys, lastWorkingIndex })
       });
       const text = await res.text();
       if (!res.ok) {
@@ -297,6 +299,9 @@ export default function App() {
         return;
       }
       if (data.enhanced) {
+        if (data.usedIndex !== undefined) {
+          localStorage.setItem('gemini_last_working_index', data.usedIndex.toString());
+        }
         if (isVideo) setVidPrompt(data.enhanced);
         else if (isEdit) setEditPrompt(data.enhanced);
         else setPrompt(data.enhanced);

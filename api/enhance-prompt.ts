@@ -7,15 +7,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { prompt, keys } = req.body;
+    const { prompt, keys, lastWorkingIndex } = req.body;
     const keyList = Array.isArray(keys) ? keys : (typeof keys === 'string' ? keys.split('\n').map((k: string) => k.trim()).filter(Boolean) : []);
 
     if (keyList.length === 0) {
       return res.status(400).json({ success: false, error: 'No Gemini API keys provided.' });
     }
 
+    const startIndex = (Number(lastWorkingIndex) || 0) % keyList.length;
+
     // Try keys
-    for (const apiKey of keyList) {
+    for (let attempt = 0; attempt < keyList.length; attempt++) {
+      const i = (startIndex + attempt) % keyList.length;
+      const apiKey = keyList[i];
       try {
         const aiInstance = new GoogleGenAI({ apiKey });
         const response = await aiInstance.models.generateContent({
@@ -32,9 +36,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           },
         });
         const enhanced = response.text?.trim() || prompt;
-        return res.json({ enhanced });
+        return res.json({ enhanced, usedIndex: i });
       } catch (err: any) {
-        console.error('Gemini API attempt failed:', err.message);
+        console.error(`Gemini API key #${i} failed:`, err.message);
         continue;
       }
     }
