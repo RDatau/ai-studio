@@ -19,6 +19,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const token of tokenList) {
       try {
         const client = await Client.connect(space || 'FelyaHuhing/qwen-image-21-uncensored', {
+          timeout: 300000,
           ...(token.trim() ? { hf_token: token.trim() } : {})
         } as any);
         
