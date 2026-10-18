@@ -22,11 +22,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           timeout: 300000,
           ...(token.trim() ? { hf_token: token.trim() } : {})
         } as any);
+        console.log(`Connected to space: ${space || 'FelyaHuhing/qwen-image-21-uncensored'}`);
         
         let response;
         if (space === 'bennie2390/Qwen-Image-Edit-Rapid-AIO-Loras-Experimental') {
+          console.log('Predicting /infer for experimental space');
           response = await client.predict('/infer', {
             input_image_1: mainImageBlob,
+            input_image_2: null,
+            input_images_extra: [],
             prompt,
             lora_adapter: "None",
             seed: 0,
@@ -45,10 +49,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             highlight_protection_strength: 0.35,
           });
         } else {
+          console.log('Predicting /edit for standard space');
           response = await client.predict('/edit', {
             prompt, input_image: mainImageBlob
           });
         }
+        console.log('Prediction successful');
         
         const outputData = response.data as any[];
         send({ success: true, imageUrl: outputData[0]?.url || outputData[0]?.path });
