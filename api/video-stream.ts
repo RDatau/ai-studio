@@ -47,6 +47,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             prompt_segments: req.body.prompt_segments || "",
             scene_chain_prompt: req.body.scene_chain_prompt || "",
             scene_chain_enabled: req.body.scene_chain_enabled || false,
+            profile_name: req.body.profile_name || "",
+            kv_enabled: req.body.kv_enabled || false,
+            kv_strength: Number(req.body.kv_strength ?? 1.0),
+            audio_ref_enabled: req.body.audio_ref_enabled || false,
             // ... (keeping other parameters at default or as in server.ts if needed)
           });
           
