@@ -26,6 +26,9 @@ import {
   Video
 } from 'lucide-react';
 import { PWAInstallButton } from './components/PWAInstallButton';
+import { generateQwenImageClientSide as generateQwenImageT2I } from './services/qwenGenerateClientService';
+import { generateQwenImageClientSide as generateQwenImageI2I } from './services/qwenClientService';
+import { generateLtxVideoClientSide } from './services/ltxClientService';
 
 interface GenerationHistoryItem {
   id: string;
@@ -313,7 +316,7 @@ export default function App() {
     }
   };
 
-  // Generate Image with server-side stream status
+  // Generate Image using client service with token rotation
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       alert('Please enter a prompt.');
@@ -324,56 +327,30 @@ export default function App() {
 
     try {
       const tokens = getTokensArray();
-      const res = await fetch('/api/generate-stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          size,
-          steps,
-          seed,
-          randomize_seed: randomizeSeed,
-          lora_scale: loraScale,
-          tokens
-        })
+      const lastWorkingIndex = Number(localStorage.getItem('qwen_gen_last_working_index') || 0);
+
+      const result = await generateQwenImageT2I({
+        prompt,
+        size,
+        steps,
+        seed,
+        randomize_seed: randomizeSeed,
+        lora_scale: loraScale,
+        tokens,
+        lastWorkingIndex,
+        onStatusUpdate: (status) => setLoadingMessage(status)
       });
 
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      let finalData: any = null;
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.substring(6));
-                if (data.status) {
-                  setLoadingMessage(data.status);
-                }
-                if (data.success !== undefined) {
-                  finalData = data;
-                }
-              } catch (e) {}
-            }
-          }
-        }
+      if (result.usedIndex !== undefined) {
+        localStorage.setItem('qwen_gen_last_working_index', result.usedIndex.toString());
       }
 
-      if (!finalData || !finalData.success) {
-        throw new Error(finalData?.error || 'Image generation failed');
-      }
-
-      const pngBase64 = await convertToPngBase64(finalData.imageUrl);
+      const pngBase64 = await convertToPngBase64(result.imageUrl);
 
       const resultObj = {
         imageUrl: pngBase64,
-        seed: finalData.seed || seed,
-        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
+        seed: seed,
+        usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
       };
       setCurrentResult(resultObj);
 
@@ -382,12 +359,12 @@ export default function App() {
         type: 'generate',
         imageUrl: pngBase64,
         prompt,
-        seed: finalData.seed || seed,
+        seed: seed,
         steps,
         loraScale,
         size,
         timestamp: new Date().toISOString(),
-        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
+        usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
       };
       
       const { addHistoryItem } = await import('./utils/db');
@@ -402,7 +379,7 @@ export default function App() {
     }
   };
 
-  // Edit Image with real-time stream status
+  // Edit Image using client service with token rotation
   const handleEdit = async () => {
     if (!editPrompt.trim()) {
       alert('Please enter an edit instruction.');
@@ -418,58 +395,28 @@ export default function App() {
 
     try {
       const tokens = getTokensArray();
-      const res = await fetch('/api/edit-stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: editPrompt,
-          image_data: mainImage,
-          extra_images: extraImages,
-          steps: editSteps,
-          seed: editSeed,
-          randomize_seed: editRandomizeSeed,
-          lora_scale: editLoraScale,
-          tokens,
-          space: editSpace
-        })
+      const lastWorkingIndex = Number(localStorage.getItem('qwen_edit_last_working_index') || 0);
+
+      const result = await generateQwenImageI2I({
+        baseImage: mainImage,
+        prompt: editPrompt,
+        spaceUrl: editSpace ? `https://huggingface.co/spaces/${editSpace}` : undefined,
+        tokens,
+        lastWorkingIndex,
+        additionalImages: extraImages,
+        onStatusUpdate: (status) => setLoadingMessage(status)
       });
 
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      let finalData: any = null;
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.substring(6));
-                if (data.status) {
-                  setLoadingMessage(data.status);
-                }
-                if (data.success !== undefined) {
-                  finalData = data;
-                }
-              } catch (e) {}
-            }
-          }
-        }
+      if (result.usedIndex !== undefined) {
+        localStorage.setItem('qwen_edit_last_working_index', result.usedIndex.toString());
       }
 
-      if (!finalData || !finalData.success) {
-        throw new Error(finalData?.error || 'Image editing failed');
-      }
-
-      const pngBase64 = await convertToPngBase64(finalData.imageUrl);
+      const pngBase64 = await convertToPngBase64(result.imageUrl);
 
       const resultObj = {
         imageUrl: pngBase64,
-        seed: finalData.seed,
-        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
+        seed: editSeed,
+        usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
       };
       setCurrentResult(resultObj);
 
@@ -478,11 +425,11 @@ export default function App() {
         type: 'edit',
         imageUrl: pngBase64,
         prompt: editPrompt,
-        seed: finalData.seed,
+        seed: editSeed,
         steps: editSteps,
         loraScale: editLoraScale,
         timestamp: new Date().toISOString(),
-        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
+        usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
       };
 
       const { addHistoryItem } = await import('./utils/db');
@@ -497,7 +444,7 @@ export default function App() {
     }
   };
 
-  // Generate Video (LTX 2.3) with server-side stream status
+  // Generate Video using client service with token rotation
   const handleVideoGenerate = async () => {
     if (!vidPrompt.trim()) {
       alert('Please enter a prompt for video generation.');
@@ -513,69 +460,37 @@ export default function App() {
 
     try {
       const tokens = getTokensArray();
-      const res = await fetch('/api/video-stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image_data: vidImage,
-          prompt: vidPrompt,
-          negative_prompt: vidNegative,
-          preset: vidPreset,
-          seconds: vidSeconds,
-          max_width: vidMaxWidth,
-          max_height: vidMaxHeight,
-          mode: vidMode,
-          seed: vidSeed,
-          randomize_seed: vidRandomize,
-          tokens
-        })
+      const lastWorkingIndex = Number(localStorage.getItem('video_token_last_working_index') || 0);
+
+      const result = await generateLtxVideoClientSide({
+        startImage: vidImage,
+        prompt: vidPrompt,
+        duration: vidSeconds || 4.0,
+        spaceUrl: 'https://huggingface.co/spaces/rdata92/LTX-2.3-10Eros',
+        tokens,
+        lastWorkingIndex,
+        onStatusUpdate: (status) => setLoadingMessage(status)
       });
 
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      let finalData: any = null;
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.substring(6));
-                if (data.status) {
-                  setLoadingMessage(data.status);
-                }
-                if (data.success !== undefined) {
-                  finalData = data;
-                }
-              } catch (e) {}
-            }
-          }
-        }
-      }
-
-      if (!finalData || !finalData.success) {
-        throw new Error(finalData?.error || 'Video generation failed');
+      if (result.usedIndex !== undefined) {
+        localStorage.setItem('video_token_last_working_index', result.usedIndex.toString());
       }
 
       const resultObj = {
-        videoUrl: finalData.videoUrl,
-        seed: finalData.seed || vidSeed || -1,
-        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
+        videoUrl: result.videoUrl,
+        seed: vidSeed || -1,
+        usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
       };
       setCurrentVideoResult(resultObj);
 
       const historyItem: GenerationHistoryItem = {
         id: Math.random().toString(36).substring(2, 9),
         type: 'video',
-        videoUrl: finalData.videoUrl,
+        videoUrl: result.videoUrl,
         prompt: vidPrompt,
-        seed: finalData.seed || vidSeed || -1,
+        seed: vidSeed || -1,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
+        usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
       };
       setHistory(prev => [historyItem, ...prev]);
     } catch (err: any) {

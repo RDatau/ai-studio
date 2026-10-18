@@ -146,13 +146,22 @@ app.post('/api/generate-stream', async (req, res) => {
     send({ status: 'Preparing data payload...' });
     const tokenArray: string[] = Array.isArray(tokens) ? tokens : (tokens ? [tokens] : []);
 
+    let width = 1024;
+    let height = 1024;
+    const sizeStr = size || '1024x1024 (1:1)';
+    if (sizeStr.includes('1344x768')) { width = 1344; height = 768; }
+    else if (sizeStr.includes('768x1344')) { width = 768; height = 1344; }
+    else if (sizeStr.includes('1184x864')) { width = 1184; height = 864; }
+    else if (sizeStr.includes('864x1184')) { width = 864; height = 1184; }
+
     const { result, usedToken } = await executeWithTokenRotation(
       tokenArray,
       async (client) => {
         const response = await client.predict('/generate', {
           prompt: prompt,
-          size: size || '1024x1024 (1:1)',
-          steps: Number(steps) || 28,
+          width,
+          height,
+          num_inference_steps: Number(steps) || 28,
           seed: Number(seed) || 0,
           randomize_seed: Boolean(randomize_seed ?? true),
           lora_scale: Number(lora_scale) || 1.0,
@@ -173,10 +182,16 @@ app.post('/api/generate-stream', async (req, res) => {
         imageUrl = imgObj.url;
       } else if (imgObj && imgObj.path) {
         imageUrl = imgObj.path;
+      } else if (typeof imgObj === 'string') {
+        imageUrl = imgObj;
       }
       if (outputData.length > 1) {
         usedSeed = outputData[1];
       }
+    }
+
+    if (imageUrl && (imageUrl.startsWith('/file=') || imageUrl.startsWith('/gradio_api/file='))) {
+      imageUrl = `https://felyahuhing-qwen-image-21-uncensored.hf.space${imageUrl}`;
     }
 
     send({
