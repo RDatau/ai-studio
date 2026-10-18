@@ -27,7 +27,7 @@ async function getGradioClient(token?: string) {
   if (token && token.trim().length > 0) {
     options.hf_token = token.trim();
   }
-  return await Client.connect(SPACE_URL, options);
+  return await Client.connect(SPACE_URL, options as any);
 }
 
 // Test token validity endpoint
@@ -147,7 +147,7 @@ async function executeWithTokenRotationForSpace<T>(
     const currentToken = tokenList[i];
     try {
       console.log(`Attempting connection to ${spaceUrl} with token index ${i + 1}/${tokenList.length} (${currentToken ? 'Custom Token' : 'Anonymous'})`);
-      const client = await Client.connect(spaceUrl, { timeout: 300000, ...(currentToken ? { hf_token: currentToken.trim() } : {}) });
+      const client = await Client.connect(spaceUrl, { timeout: 300000, ...(currentToken ? { hf_token: currentToken.trim() } : {}) } as any);
       const result = await fn(client, spaceUrl, currentToken);
       return { result, usedToken: currentToken };
     } catch (err: any) {
@@ -263,28 +263,8 @@ app.post('/api/enhance-prompt', async (req, res) => {
       return res.json({ enhanced: prompt });
     }
     const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite',
+      model: 'gemini-2.5-flash',
       contents: `You are an expert prompt engineer for Qwen-Image-2.1 uncensored generative AI. Enhance this prompt to be extremely descriptive, high-quality, artistic, and detailed for high-fidelity image generation, while maintaining the user's core intent. Return ONLY the enhanced prompt text without explanations: "${prompt}"`,
-      config: {
-        safetySettings: [
-          {
-            category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-            threshold: 'BLOCK_NONE',
-          },
-          {
-            category: 'HARM_CATEGORY_HATE_SPEECH',
-            threshold: 'BLOCK_NONE',
-          },
-          {
-            category: 'HARM_CATEGORY_HARASSMENT',
-            threshold: 'BLOCK_NONE',
-          },
-          {
-            category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
-            threshold: 'BLOCK_NONE',
-          },
-        ]
-      }
     });
     const enhanced = response.text?.trim() || prompt;
     res.json({ enhanced });
