@@ -56,9 +56,8 @@ export async function generateQwenImageClientSide(params: QwenGenerateParams): P
 
       const response = await client.predict('/generate', {
         prompt,
-        width,
-        height,
-        num_inference_steps: steps,
+        size,
+        steps: steps,
         seed,
         randomize_seed,
         lora_scale

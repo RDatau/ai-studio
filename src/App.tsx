@@ -403,6 +403,10 @@ export default function App() {
         prompt: editPrompt,
         spaceUrl: editSpace ? `https://huggingface.co/spaces/${editSpace}` : undefined,
         tokens,
+        steps: editSteps,
+        seed: editSeed,
+        randomize_seed: editRandomizeSeed,
+        lora_scale: editLoraScale,
         lastWorkingIndex,
         additionalImages: extraImages,
         onStatusUpdate: (status) => setLoadingMessage(status)

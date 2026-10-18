@@ -5,6 +5,10 @@ export interface QwenClientParams {
   prompt: string;
   spaceUrl?: string;
   tokens: string[];
+  steps?: number;
+  seed?: number;
+  randomize_seed?: boolean;
+  lora_scale?: number;
   lastWorkingIndex?: number;
   extraRefImage?: string | null;
   additionalImages?: string[];
@@ -17,6 +21,10 @@ export async function generateQwenImageClientSide(params: QwenClientParams): Pro
     prompt,
     spaceUrl = 'https://huggingface.co/spaces/bennie2390/Qwen-Image-Edit-Rapid-AIO-Loras-Experimental',
     tokens = [''],
+    steps = 28,
+    seed = 0,
+    randomize_seed = true,
+    lora_scale = 1.0,
     lastWorkingIndex = 0,
     extraRefImage,
     additionalImages = [],
@@ -68,26 +76,14 @@ export async function generateQwenImageClientSide(params: QwenClientParams): Pro
       const client = await Client.connect(host, clientOptions);
       onStatusUpdate?.("Terhubung! Mengirim tugas edit gambar ke ZeroGPU...");
 
-      const response = await client.predict('/infer', {
-        input_image_1: baseBlob,
-        input_image_2: extraBlob,
-        input_images_extra: extraBlobs,
+      const response = await client.predict('/edit', {
         prompt: prompt,
-        lora_adapter: "None",
-        seed: 0,
-        randomize_seed: true,
-        guidance_scale: 1.0,
-        steps: 28,
-        target_megapixels: 1.0,
-        extras_condition_only: true,
-        pad_to_canvas: true,
-        vae_tiling: false,
-        resolution_multiple: 32,
-        vae_ref_megapixels: 0.0,
-        decoder_vae: "qwen",
-        keep_decoder_2x: false,
-        highlight_protection: true,
-        highlight_protection_strength: 0.35,
+        input_image: baseBlob,
+        extra_images: [extraBlob, ...extraBlobs].filter(Boolean),
+        steps: steps,
+        seed: seed,
+        randomize_seed: randomize_seed,
+        lora_scale: lora_scale,
       });
 
       const outputData = response.data as any[];
