@@ -76,22 +76,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             throw new Error('Video URL not found in Space response output.');
           }
 
-          console.log('Fetching generated video from URL:', videoUrl);
-          // Fetch the video with authorization header if token is present
-          const videoRes = await fetch(videoUrl, {
-            headers: token.trim() ? { 'Authorization': `Bearer ${token.trim()}` } : {}
-          });
-          if (!videoRes.ok) {
-            throw new Error(`Failed to fetch video file from space: ${videoRes.status} ${videoRes.statusText}`);
+          // Ensure container internal localhost is replaced by spaceHost if needed
+          videoUrl = videoUrl.replace(/^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?/i, 'https://rdata92-ltx-2-3-10eros.hf.space');
+          if (videoUrl.startsWith('/file=') || videoUrl.startsWith('/gradio_api/file=')) {
+            videoUrl = `https://rdata92-ltx-2-3-10eros.hf.space${videoUrl}`;
           }
-          const videoBlob = await videoRes.blob();
-          const arrayBuffer = await videoBlob.arrayBuffer();
-          const base64Video = Buffer.from(arrayBuffer).toString('base64');
-          const dataUrl = `data:video/mp4;base64,${base64Video}`;
+
+          console.log('Returning direct signed video URL to client:', videoUrl);
 
           send({ 
             success: true, 
-            videoUrl: dataUrl,
+            videoUrl: videoUrl,
             seed: usedSeed,
             usedIndex: i
           });

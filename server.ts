@@ -15,14 +15,10 @@ const VIDEO_SPACE_URL = 'rdata92/LTX-2.3-10Eros';
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
-
-
 async function getGradioClient(token?: string) {
-  const options: any = {
-    timeout: 300000
-  };
+  const options: any = {};
   if (token && token.trim().length > 0) {
-    options.hf_token = token.trim();
+    options.token = token.trim();
   }
   return await Client.connect(SPACE_URL, options as any);
 }
@@ -535,7 +531,7 @@ async function startServer() {
     });
   }
 
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
