@@ -55,9 +55,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
           
           const outputData = response.data as any[];
+          const videoUrl = outputData[0]?.url || outputData[0]?.path;
+          
+          // Fetch the video and convert to base64
+          const videoBlob = await fetch(videoUrl).then(r => r.blob());
+          const arrayBuffer = await videoBlob.arrayBuffer();
+          const base64Video = Buffer.from(arrayBuffer).toString('base64');
+          const dataUrl = `data:video/mp4;base64,${base64Video}`;
+
           send({ 
             success: true, 
-            videoUrl: outputData[0]?.url || outputData[0]?.path,
+            videoUrl: dataUrl,
             seed: outputData.length > 2 ? outputData[2] : req.body.seed,
             usedIndex: i
           });
