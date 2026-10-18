@@ -288,7 +288,7 @@ export default function App() {
         body: JSON.stringify({ prompt: targetPrompt, keys })
       });
       if (!res.ok) {
-        const text = await res.text();
+        const text = await res.clone().text();
         throw new Error(`Server returned ${res.status}: ${text.substring(0, 50)}...`);
       }
       const data = await res.json();
@@ -360,7 +360,7 @@ export default function App() {
       }
 
       if (!res.ok) {
-        const text = await res.text();
+        const text = await res.clone().text();
         throw new Error(`Server returned ${res.status}: ${text.substring(0, 50)}...`);
       }
 
