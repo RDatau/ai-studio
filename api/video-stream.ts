@@ -4,36 +4,59 @@ import { Client } from '@gradio/client';
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).send('Method not allowed');
   
-  const { prompt, image_data, tokens } = req.body;
-  const tokenList = Array.isArray(tokens) ? tokens : (tokens ? [tokens] : ['']);
+    const tokenList = Array.isArray(tokens) ? tokens : (tokens ? [tokens] : ['']);
+    const startIndex = (Number(req.body.lastWorkingIndex) || 0) % tokenList.length;
   
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-
-  const send = (data: any) => res.write(`data: ${JSON.stringify(data)}\n\n`);
-
-  try {
-    const imageBlob = await fetch(image_data).then(r => r.blob());
-
-    for (const token of tokenList) {
-      try {
-        const client = await Client.connect('rdata92/LTX-2.3-10Eros', {
-          ...(token.trim() ? { hf_token: token.trim() } : {})
-        } as any);
-        
-        const response = await client.predict('/generate', {
-          image_path: imageBlob, prompt
-        });
-        
-        const outputData = response.data as any[];
-        send({ success: true, videoUrl: outputData[0]?.url || outputData[0]?.path });
-        return res.end();
-      } catch (e) { continue; }
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+  
+    const send = (data: any) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+  
+    try {
+      const imageBlob = await fetch(image_data).then(r => r.blob());
+  
+      for (let attempt = 0; attempt < tokenList.length; attempt++) {
+        const i = (startIndex + attempt) % tokenList.length;
+        const token = tokenList[i];
+        try {
+          const client = await Client.connect('rdata92/LTX-2.3-10Eros', {
+            timeout: 300000,
+            ...(token.trim() ? { hf_token: token.trim() } : {})
+          } as any);
+          
+          const response = await client.predict('/generate', {
+            image_path: imageBlob,
+            prompt: prompt,
+            negative_prompt: req.body.negative_prompt || "captions, music, transition, VR, bad quality, subtitles, text, watermark, overlay effects, cartoon, childish, ugly, text, blur, logo, static, low quality, noise, mutant, horror, film grain",
+            preset: req.body.preset || "tuned",
+            seconds: Number(req.body.seconds) || 4.0,
+            max_width: Number(req.body.max_width) || 1120,
+            max_height: Number(req.body.max_height) || 1344,
+            mode: req.body.mode || "anchor only",
+            face_bbox: req.body.face_bbox || "",
+            likeness_strength: Number(req.body.likeness_strength ?? 0.9),
+            likeness_anchor_strength: Number(req.body.likeness_anchor_strength ?? 0.15),
+            latent_anchor_strength: Number(req.body.latent_anchor_strength ?? 0.08),
+            first_frame_strength: Number(req.body.first_frame_strength ?? 0.82),
+            seed: Number(req.body.seed ?? -1),
+            randomize_seed: Boolean(req.body.seed == -1 || req.body.randomize_seed),
+            // ... (keeping other parameters at default or as in server.ts if needed)
+          });
+          
+          const outputData = response.data as any[];
+          send({ 
+            success: true, 
+            videoUrl: outputData[0]?.url || outputData[0]?.path,
+            seed: outputData.length > 2 ? outputData[2] : req.body.seed,
+            usedIndex: i
+          });
+          return res.end();
+        } catch (e) { continue; }
+      }
+      throw new Error('All tokens failed');
+    } catch (e: any) {
+      send({ success: false, error: e.message });
+      res.end();
     }
-    throw new Error('All tokens failed');
-  } catch (e: any) {
-    send({ success: false, error: e.message });
-    res.end();
   }
-}

@@ -519,6 +519,8 @@ export default function App() {
 
     try {
       const tokens = getTokensArray();
+      const lastWorkingIndex = localStorage.getItem('video_token_last_working_index') || 0;
+
       const res = await fetch('/api/video-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -533,7 +535,8 @@ export default function App() {
           mode: vidMode,
           seed: vidSeed,
           randomize_seed: vidRandomize,
-          tokens
+          tokens,
+          lastWorkingIndex
         })
       });
 
@@ -567,10 +570,14 @@ export default function App() {
         throw new Error(finalData?.error || 'Video generation failed');
       }
 
+      if (finalData.usedIndex !== undefined) {
+        localStorage.setItem('video_token_last_working_index', finalData.usedIndex.toString());
+      }
+
       const resultObj = {
         videoUrl: finalData.videoUrl,
         seed: finalData.seed,
-        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
+        usedTokenMasked: finalData.usedIndex !== undefined ? `Token #${Number(finalData.usedIndex) + 1}` : 'Anonymous'
       };
       setCurrentVideoResult(resultObj);
 
@@ -581,7 +588,7 @@ export default function App() {
         prompt: vidPrompt,
         seed: finalData.seed,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
+        usedTokenMasked: finalData.usedIndex !== undefined ? `Token #${Number(finalData.usedIndex) + 1}` : 'Anonymous'
       };
       setHistory(prev => [historyItem, ...prev]);
     } catch (err: any) {
