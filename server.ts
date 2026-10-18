@@ -506,6 +506,7 @@ app.post('/api/enhance-prompt', async (req, res) => {
         return res.json({ enhanced, usedKeyIndex: i + 1 });
       } catch (err: any) {
         console.error(`Gemini API key #${i + 1} failed:`, err.message || err);
+        if (err.stack) console.error('Stack trace:', err.stack);
         // Continue to the next attempt even if this key failed
       }
     }
