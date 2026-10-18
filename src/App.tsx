@@ -288,10 +288,12 @@ export default function App() {
       const keys = keyStr.split('\n').map(l => l.trim()).filter(Boolean);
       const lastWorkingIndex = localStorage.getItem('gemini_last_working_index') || 0;
       
+      const image = isVideo ? vidImage : (isEdit ? mainImage : null);
+      
       const res = await fetch('/api/enhance-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: targetPrompt, keys, lastWorkingIndex })
+        body: JSON.stringify({ prompt: targetPrompt, keys, lastWorkingIndex, image })
       });
       const text = await res.text();
       if (!res.ok) {

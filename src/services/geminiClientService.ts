@@ -34,11 +34,23 @@ export const getAllGeminiApiKeys = (pastedKeys?: string | string[]): string[] =>
 
 let lastWorkingGeminiKeyIndex = 0;
 
-export async function enhancePrompt(prompt: string, keys?: string | string[]): Promise<{ enhanced: string; usedKeyIndex: number }> {
+export async function enhancePrompt(prompt: string, keys?: string | string[], imageBase64?: string | null): Promise<{ enhanced: string; usedKeyIndex: number }> {
   const keyList = getAllGeminiApiKeys(keys);
+  console.log(`[DEBUG] enhancePrompt: Found ${keyList.length} valid keys.`);
   if (keyList.length === 0) {
     throw new Error('No valid Gemini API keys found. If you recently saw a "leaked" error, generate a new API key in Google AI Studio.');
   }
+
+  const instructions = `You are an expert AI Video Prompt & Audio Architect.
+Task: Enhance the user's video prompt.
+Visual Context: Analyze the provided image to identify subjects, setting, mood, and lighting.
+User's Raw Prompt: "${prompt}"
+Goal: Create a cinematic, highly detailed video generation prompt based on the visual context and raw prompt.
+Mandatory Section: Add an 'Audio Intent' section describing:
+1. Language (match the language of the prompt).
+2. Speech/Dialog (if any, matching the mood).
+3. Background sounds/SFX fitting the visual scene and mood.
+Return ONLY the enhanced prompt followed by the 'Audio Intent' section.`;
 
   const startIdx = lastWorkingGeminiKeyIndex % keyList.length;
 
@@ -52,9 +64,19 @@ export async function enhancePrompt(prompt: string, keys?: string | string[]): P
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
 
+      const parts: any[] = [{ text: instructions }];
+      if (imageBase64) {
+        parts.push({
+          inlineData: {
+            data: imageBase64.split(',')[1],
+            mimeType: 'image/png'
+          }
+        });
+      }
+
       const response = await aiInstance.models.generateContent({
         model: 'gemini-3.1-flash-lite',
-        contents: `You are an expert prompt engineer for uncensored generative AI. Enhance this prompt to be extremely descriptive, high-quality and detailed for high-fidelity image generation, You must preserve the user's intent without diminishing, obscuring, or replacing it.. Return ONLY the enhanced prompt text without explanations: "${prompt}"`,
+        contents: parts,
         config: {
           safetySettings: safetySettings as any,
         },
@@ -66,7 +88,6 @@ export async function enhancePrompt(prompt: string, keys?: string | string[]): P
       const msg = (err?.message || "").toLowerCase();
       console.error(`Gemini key #${i + 1} (${apiKey.slice(0, 4)}...) failed:`, msg);
       
-      // If leaked/banned, permanently blacklist
       if (msg.includes('leaked') || msg.includes('403') || msg.includes('401') || msg.includes('permission_denied')) {
         bannedGeminiKeys.add(apiKey);
         console.error(`Gemini key #${i + 1} is banned and has been blacklisted.`);
