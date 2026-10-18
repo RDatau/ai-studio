@@ -17,12 +17,8 @@ app.use(express.json({ limit: '50mb' }));
 
 
 
-async function getGradioClient(token?: string) {
-  const options: any = {
-    timeout: 300000
-  };
   if (token && token.trim().length > 0) {
-    options.hf_token = token.trim();
+    options.token = token.trim();
   }
   return await Client.connect(SPACE_URL, options as any);
 }

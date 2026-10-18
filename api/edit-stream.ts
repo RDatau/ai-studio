@@ -22,9 +22,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ...(token.trim() ? { hf_token: token.trim() } : {})
         } as any);
         
-        const response = await client.predict('/edit', {
-          prompt, input_image: mainImageBlob
-        });
+        let response;
+        if (space === 'bennie2390/Qwen-Image-Edit-Rapid-AIO-Loras-Experimental') {
+          response = await client.predict('/infer', {
+            input_image_1: mainImageBlob,
+            prompt,
+            lora_adapter: "None",
+            seed: 0,
+            randomize_seed: true,
+            guidance_scale: 1.0,
+            steps: 28,
+            target_megapixels: 1.0,
+            extras_condition_only: true,
+            pad_to_canvas: true,
+            vae_tiling: false,
+            resolution_multiple: 32,
+            vae_ref_megapixels: 0.0,
+            decoder_vae: "qwen",
+            keep_decoder_2x: false,
+            highlight_protection: true,
+            highlight_protection_strength: 0.35,
+          });
+        } else {
+          response = await client.predict('/edit', {
+            prompt, input_image: mainImageBlob
+          });
+        }
         
         const outputData = response.data as any[];
         send({ success: true, imageUrl: outputData[0]?.url || outputData[0]?.path });
