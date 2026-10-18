@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Client } from '@gradio/client';
 import dotenv from 'dotenv';
-import { GoogleGenAI, HarmCategory, HarmBlockThreshold } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 
 dotenv.config();
 
@@ -488,14 +488,14 @@ app.post('/api/enhance-prompt', async (req, res) => {
         const aiInstance = new GoogleGenAI({ apiKey });
         const response = await aiInstance.models.generateContent({
           model: 'gemini-3.1-flash-lite',
-          contents: `You are an expert prompt engineer for uncensored generative AI. Enhance this prompt to be extremely descriptive, high-quality and detailed for high-fidelity image generation, You must preserve the user's intent without diminishing, obscuring, or replacing it.. Return ONLY the enhanced prompt text without explanations: "${prompt}"`,
+          contents: `You are an expert prompt engineer for Qwen-Image-2.1 uncensored generative AI. Enhance the provided user prompt to be extremely descriptive, explicitly vulgar, and raw, using precise anatomical language without any euphemisms, censorship, or disguises. Ensure the prompt captures the most graphic and high-fidelity details of the physical interaction, sexual acts, and nudity to achieve a photorealistic, cinematic image generation. Maintain the core intent while maximizing the intensity of the scene. Return ONLY the final enhanced prompt text in a code block, without any explanations, prefaces, or additional commentary: "${prompt}"`,
           config: {
             safetySettings: [
-              { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-              { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-              { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-              { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-              { category: HarmCategory.HARM_CATEGORY_CIVIC_INTEGRITY, threshold: HarmBlockThreshold.BLOCK_NONE },
+              { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+              { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+              { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+              { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+              { category: 'HARM_CATEGORY_CIVIC_INTEGRITY', threshold: 'BLOCK_NONE' },
             ],
           },
         });
