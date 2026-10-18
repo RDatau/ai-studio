@@ -287,11 +287,11 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: targetPrompt, keys })
       });
+      const text = await res.text();
       if (!res.ok) {
-        const text = await res.clone().text();
         throw new Error(`Server returned ${res.status}: ${text.substring(0, 50)}...`);
       }
-      const data = await res.json();
+      const data = JSON.parse(text);
       if (!data.success && data.error) {
         alert(data.error);
         return;
@@ -333,6 +333,7 @@ export default function App() {
         })
       });
 
+      const resClone = res.clone();
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
       let finalData: any = null;
@@ -360,7 +361,7 @@ export default function App() {
       }
 
       if (!res.ok) {
-        const text = await res.clone().text();
+        const text = await resClone.text();
         throw new Error(`Server returned ${res.status}: ${text.substring(0, 50)}...`);
       }
 
