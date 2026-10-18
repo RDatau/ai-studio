@@ -533,6 +533,36 @@ app.post('/api/enhance-prompt', async (req, res) => {
   }
 });
 
+// HF Proxy endpoint for bypassing CORS and network restrictions
+app.all('/api/hf-proxy', async (req, res) => {
+  try {
+    const targetUrl = (req.query.url as string) || (req.body?.url as string);
+    if (!targetUrl) {
+      return res.status(400).json({ error: 'Missing target url parameter' });
+    }
+
+    const fetchOptions: RequestInit = {
+      method: req.method,
+      headers: {
+        ...(req.headers.authorization ? { Authorization: req.headers.authorization } : {}),
+        ...(req.headers['content-type'] ? { 'Content-Type': req.headers['content-type'] as string } : {})
+      },
+      ...(['POST', 'PUT', 'PATCH'].includes(req.method) ? { body: JSON.stringify(req.body) } : {})
+    };
+
+    const response = await fetch(targetUrl, fetchOptions);
+    res.status(response.status);
+    response.headers.forEach((value, key) => {
+      res.setHeader(key, value);
+    });
+    const buffer = await response.arrayBuffer();
+    res.send(Buffer.from(buffer));
+  } catch (err: any) {
+    console.error('HF Proxy error:', err);
+    res.status(500).json({ error: err.message || 'Proxy request failed' });
+  }
+});
+
 // Setup Vite middleware in development
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
