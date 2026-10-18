@@ -13,6 +13,10 @@ const SPACE_URL = 'FelyaHuhing/qwen-image-21-uncensored';
 const VIDEO_SPACE_URL = 'rdata92/LTX-2.3-10Eros';
 
 const app = express();
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
 app.use(express.json({ limit: '50mb' }));
 
 

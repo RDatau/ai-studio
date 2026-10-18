@@ -287,6 +287,10 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: targetPrompt, keys })
       });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Server returned ${res.status}: ${text.substring(0, 50)}...`);
+      }
       const data = await res.json();
       if (!data.success && data.error) {
         alert(data.error);
@@ -353,6 +357,11 @@ export default function App() {
             }
           }
         }
+      }
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Server returned ${res.status}: ${text.substring(0, 50)}...`);
       }
 
       if (!finalData || !finalData.success) {
