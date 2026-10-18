@@ -55,13 +55,12 @@ export async function generateQwenImageClientSide(params: QwenGenerateParams): P
       onStatusUpdate?.("Terhubung! Mengirim tugas generate gambar...");
 
       const response = await client.predict('/generate', {
-        prompt,
-        width,
-        height,
-        num_inference_steps: steps,
-        seed,
-        randomize_seed,
-        lora_scale
+        prompt: prompt,
+        size: size || "1024x1024 (1:1)",
+        num_inference_steps: Number(steps) || 28,
+        seed: Number(seed) || 0,
+        randomize_seed: Boolean(randomize_seed ?? true),
+        lora_scale: Number(lora_scale) || 1.0,
       });
 
       const outputData = response.data as any[];

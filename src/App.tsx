@@ -209,6 +209,34 @@ export default function App() {
         console.error('Failed to load history from IndexedDB', e);
       }
     });
+
+    // Auto-load Vercel environment keys and tokens if configured
+    fetch('/api/env-config')
+      .then(res => res.json())
+      .then(data => {
+        if (data.geminiKeys && data.geminiKeys.length > 0) {
+          setGeminiKeyInputText(prev => {
+            if (!prev.trim()) {
+              const joined = data.geminiKeys.join('\n');
+              localStorage.setItem('qwen_gemini_keys', joined);
+              return joined;
+            }
+            return prev;
+          });
+        }
+        if (data.hfTokens && data.hfTokens.length > 0) {
+          setTokenInputText(prev => {
+            if (!prev.trim()) {
+              const joined = data.hfTokens.join('\n');
+              localStorage.setItem('qwen_hf_tokens', joined);
+              updateTokenStatuses(joined);
+              return joined;
+            }
+            return prev;
+          });
+        }
+      })
+      .catch(() => {});
   }, []);
 
 
@@ -404,6 +432,10 @@ export default function App() {
         tokens,
         lastWorkingIndex,
         additionalImages: extraImages,
+        steps: editSteps,
+        seed: editSeed,
+        randomize_seed: editRandomizeSeed,
+        lora_scale: editLoraScale,
         onStatusUpdate: (status) => setLoadingMessage(status)
       });
 

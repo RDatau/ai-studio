@@ -553,6 +553,21 @@ app.post('/api/enhance-prompt', async (req, res) => {
   }
 });
 
+// Environment config endpoint for auto-loading Vercel env keys/tokens into frontend
+app.get('/api/env-config', (req, res) => {
+  const geminiEnv = process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEYS || '';
+  const hfEnv = process.env.HF_TOKENS || process.env.HF_TOKEN || '';
+  res.json({
+    hasGeminiEnv: !!geminiEnv,
+    geminiKeys: parseGeminiApiKeys(geminiEnv),
+    hasHfEnv: !!hfEnv,
+    hfTokens: hfEnv
+      .split(/[\r\n,;\s]+/)
+      .map(t => t.trim().replace(/^(?:HF_TOKEN|TOKEN)\s*[:=]\s*/i, '').replace(/^Bearer\s+/i, '').replace(/^["']|["']$/g, '').trim())
+      .filter(Boolean)
+  });
+});
+
 // Gemini Key Validation endpoint with multi-key support
 app.post('/api/validate-gemini-key', async (req, res) => {
   try {
