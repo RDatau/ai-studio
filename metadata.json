@@ -1,0 +1,6 @@
+{
+  "name": "Qwen Image Studio Pro",
+  "description": "Advanced Qwen Image 2.1 Uncensored generator & editor linked with Hugging Face Space with multi-token rotation and history gallery.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
