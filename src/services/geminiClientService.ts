@@ -26,11 +26,8 @@ export const parseGeminiApiKeys = (input?: string): string[] => {
 };
 
 export const getAllGeminiApiKeys = (pastedKeys?: string | string[]): string[] => {
-  const envKey = process.env.GEMINI_API_KEY || '';
   const pastedStr = Array.isArray(pastedKeys) ? pastedKeys.join('\n') : (pastedKeys || '');
-  const localCached = typeof localStorage !== 'undefined' ? (localStorage.getItem('qwen_gemini_keys') || '') : '';
-  const combined = [pastedStr, envKey, localCached].join('\n');
-  const parsed = parseGeminiApiKeys(combined);
+  const parsed = parseGeminiApiKeys(pastedStr);
   return Array.from(new Set(parsed));
 };
 
@@ -77,7 +74,14 @@ export const createGeminiClient = (apiKey?: string): GoogleGenAI => {
   if (!apiKey) {
     throw new Error("API Key Gemini belum diatur.");
   }
-  return new GoogleGenAI({ apiKey });
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
+  });
 };
 
 export async function enhancePrompt(prompt: string, keys?: string | string[], imageBase64?: string | null): Promise<{ enhanced: string; usedKeyIndex: number }> {
@@ -101,6 +105,7 @@ Return ONLY the enhanced prompt followed by the 'Audio Intent' section.`;
     const keyObj = getNextAvailableGeminiKey(allKeys);
     if (!keyObj) break;
     const { key, index } = keyObj;
+    console.log(`[DEBUG] Attempting generation. Key index: ${index}, Key preview: ${key.slice(0, 4)}...`);
     
     try {
       const aiInstance = createGeminiClient(key);
@@ -114,15 +119,17 @@ Return ONLY the enhanced prompt followed by the 'Audio Intent' section.`;
         });
       }
 
+      console.log(`[DEBUG] Sending request to Gemini...`);
       const response = await aiInstance.models.generateContent({
         model: 'gemini-3.1-flash-lite',
         contents: parts,
         config: { safetySettings: safetySettings as any },
       });
       
+      console.log(`[DEBUG] Gemini response received.`);
       return { enhanced: response.text?.trim() || prompt, usedKeyIndex: index + 1 };
     } catch (err: any) {
-      console.error(`Gemini key #${index + 1} failed:`, err.message);
+      console.error(`[DEBUG] Gemini key #${index + 1} failed. Error:`, err.message);
       markGeminiKeyExhausted(key);
     }
   }
