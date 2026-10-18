@@ -159,8 +159,7 @@ app.post('/api/generate-stream', async (req, res) => {
       async (client) => {
         const response = await client.predict('/generate', {
           prompt: prompt,
-          width,
-          height,
+          size: sizeStr,
           num_inference_steps: Number(steps) || 28,
           seed: Number(seed) || 0,
           randomize_seed: Boolean(randomize_seed ?? true),
@@ -530,6 +529,43 @@ app.post('/api/enhance-prompt', async (req, res) => {
   } catch (err: any) {
     console.error('Prompt enhancement error:', err);
     res.status(500).json({ success: false, error: err.message || 'Prompt enhancement failed' });
+  }
+});
+
+// Gemini Key Validation endpoint with multi-key support
+app.post('/api/validate-gemini-key', async (req, res) => {
+  try {
+    const { apiKey } = req.body;
+    if (!apiKey || !apiKey.trim()) {
+      return res.json({ valid: false, message: 'API Key kosong.' });
+    }
+    const keys = apiKey.split(/[\r\n,;\s]+/).map((k: string) => k.trim()).filter(Boolean);
+    const testModels = ["gemini-3.1-flash-lite"];
+
+    for (const k of keys) {
+      const ai = new GoogleGenAI({ apiKey: k });
+      for (const m of testModels) {
+        try {
+          await ai.models.generateContent({
+            model: m,
+            contents: [{ parts: [{ text: "hi" }] }],
+            config: { safetySettings: safetySettings as any }
+          });
+          return res.json({ valid: true, message: 'API Key valid! ✨ Siap digunakan.', activeKeyCount: keys.length });
+        } catch (err: any) {
+          const msg = (err?.message || "").toLowerCase();
+          if (msg.includes('429') || msg.includes('quota') || msg.includes('resource_exhausted')) {
+            return res.json({ valid: false, message: 'API Key valid, tapi kuota limit (429).' });
+          }
+          if (msg.includes('api_key_invalid') || msg.includes('not valid')) {
+            return res.json({ valid: false, message: 'API Key tidak valid.' });
+          }
+        }
+      }
+    }
+    return res.json({ valid: false, message: 'API Key tidak valid atau limit habis.' });
+  } catch (err: any) {
+    res.status(500).json({ valid: false, message: err.message });
   }
 });
 
