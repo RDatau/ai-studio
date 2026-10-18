@@ -63,17 +63,75 @@ const SAMPLE_PROMPTS = [
 
 const LTX_PRESETS = ["tuned", "original", "tuned #2", "experimental #1"];
 
+const convertToPngBase64 = async (imageUrl: string): Promise<string> => {
+  const response = await fetch(imageUrl);
+  const blob = await response.blob();
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx!.drawImage(img, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(blob);
+  });
+};
+
 export default function App() {
   // Navigation & Modal state
   const [activeTab, setActiveTab] = useState<'generate' | 'edit' | 'video' | 'gallery'>('generate');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [fullScreenMedia, setFullScreenMedia] = useState<{ url: string; type: 'image' | 'video' } | null>(null);
+  const [editSpace, setEditSpace] = useState('FelyaHuhing/qwen-image-21-uncensored');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [infoModal, setInfoModal] = useState<GenerationHistoryItem | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+
+  // ... (existing state)
 
   // Token state
   const [tokenInputText, setTokenInputText] = useState<string>('');
   const [tokenStatuses, setTokenStatuses] = useState<TokenStatus[]>([]);
   const [testingTokenIdx, setTestingTokenIdx] = useState<number | null>(null);
   const [testingAll, setTestingAll] = useState(false);
+
+  const handleDragOver = (e: React.DragEvent) => e.preventDefault();
+
+  const handleDrop = async (e: React.DragEvent, setter: (val: string) => void) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      const url = URL.createObjectURL(file);
+      const base64 = await convertToPngBase64(url);
+      setter(base64);
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const handleExtraDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    const files = e.dataTransfer.files;
+    if (files) {
+      for (const file of Array.from(files)) {
+        if (file.type.startsWith('image/')) {
+          const url = URL.createObjectURL(file);
+          const base64 = await convertToPngBase64(url);
+          setExtraImages(prev => [...prev, base64]);
+          URL.revokeObjectURL(url);
+        }
+      }
+    }
+  };
 
   // Generator inputs
   const [prompt, setPrompt] = useState('');
@@ -115,27 +173,28 @@ export default function App() {
   const [history, setHistory] = useState<GenerationHistoryItem[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Load tokens and history from localStorage on mount
+  // Load tokens and history from IndexedDB on mount
   useEffect(() => {
     const savedTokens = localStorage.getItem('qwen_hf_tokens');
     if (savedTokens) {
       setTokenInputText(savedTokens);
       updateTokenStatuses(savedTokens);
     }
-    const savedHistory = localStorage.getItem('qwen_history');
-    if (savedHistory) {
+    
+    import('./utils/db').then(async ({ getHistory }) => {
       try {
-        setHistory(JSON.parse(savedHistory));
+        const savedHistory = await getHistory();
+        if (savedHistory && savedHistory.length > 0) {
+          setHistory(savedHistory.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+        }
       } catch (e) {
-        console.error(e);
+        console.error('Failed to load history from IndexedDB', e);
       }
-    }
+    });
   }, []);
 
-  // Save history to localStorage
-  useEffect(() => {
-    localStorage.setItem('qwen_history', JSON.stringify(history));
-  }, [history]);
+
+  // Remove the useEffect that saves history to localStorage
 
   // Update token statuses array when textarea changes
   const updateTokenStatuses = (text: string) => {
@@ -255,8 +314,10 @@ export default function App() {
         throw new Error(data.error || 'Generation failed');
       }
 
+      const pngBase64 = await convertToPngBase64(data.imageUrl);
+
       const resultObj = {
-        imageUrl: data.imageUrl,
+        imageUrl: pngBase64,
         seed: data.seed,
         usedTokenMasked: data.usedTokenMasked || 'Anonymous'
       };
@@ -265,15 +326,19 @@ export default function App() {
       const historyItem: GenerationHistoryItem = {
         id: Math.random().toString(36).substring(2, 9),
         type: 'generate',
-        imageUrl: data.imageUrl,
+        imageUrl: pngBase64,
         prompt,
         seed: data.seed,
         steps,
         loraScale,
         size,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        timestamp: new Date().toISOString(),
         usedTokenMasked: data.usedTokenMasked || 'Anonymous'
       };
+      
+      const { addHistoryItem } = await import('./utils/db');
+      await addHistoryItem(historyItem);
+      
       setHistory(prev => [historyItem, ...prev]);
     } catch (err: any) {
       alert(`Error: ${err.message || 'Failed to generate image'}`);
@@ -310,7 +375,8 @@ export default function App() {
           seed: editSeed,
           randomize_seed: editRandomizeSeed,
           lora_scale: editLoraScale,
-          tokens
+          tokens,
+          space: editSpace
         })
       });
 
@@ -319,8 +385,10 @@ export default function App() {
         throw new Error(data.error || 'Image editing failed');
       }
 
+      const pngBase64 = await convertToPngBase64(data.imageUrl);
+
       const resultObj = {
-        imageUrl: data.imageUrl,
+        imageUrl: pngBase64,
         seed: data.seed,
         usedTokenMasked: data.usedTokenMasked || 'Anonymous'
       };
@@ -329,14 +397,18 @@ export default function App() {
       const historyItem: GenerationHistoryItem = {
         id: Math.random().toString(36).substring(2, 9),
         type: 'edit',
-        imageUrl: data.imageUrl,
+        imageUrl: pngBase64,
         prompt: editPrompt,
         seed: data.seed,
         steps: editSteps,
         loraScale: editLoraScale,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        timestamp: new Date().toISOString(),
         usedTokenMasked: data.usedTokenMasked || 'Anonymous'
       };
+
+      const { addHistoryItem } = await import('./utils/db');
+      await addHistoryItem(historyItem);
+      
       setHistory(prev => [historyItem, ...prev]);
     } catch (err: any) {
       alert(`Error: ${err.message || 'Failed to edit image'}`);
@@ -411,44 +483,35 @@ export default function App() {
   };
 
   // Handle file uploads
-  const handleMainImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMainImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setMainImage(event.target.result as string);
-        }
-      };
-      reader.readAsDataURL(file);
+      const url = URL.createObjectURL(file);
+      const base64 = await convertToPngBase64(url);
+      setMainImage(base64);
+      URL.revokeObjectURL(url);
     }
   };
 
-  const handleVidImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVidImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setVidImage(event.target.result as string);
-        }
-      };
-      reader.readAsDataURL(file);
+      const url = URL.createObjectURL(file);
+      const base64 = await convertToPngBase64(url);
+      setVidImage(base64);
+      URL.revokeObjectURL(url);
     }
   };
 
-  const handleExtraImagesUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleExtraImagesUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files) {
-      Array.from(files).forEach((file: File) => {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          if (event.target?.result) {
-            setExtraImages(prev => [...prev, event.target!.result as string]);
-          }
-        };
-        reader.readAsDataURL(file);
-      });
+      for (const file of Array.from(files)) {
+        const url = URL.createObjectURL(file);
+        const base64 = await convertToPngBase64(url);
+        setExtraImages(prev => [...prev, base64]);
+        URL.revokeObjectURL(url);
+      }
     }
   };
 
@@ -464,6 +527,16 @@ export default function App() {
     const seqNum = String(index !== undefined ? index + 1 : Math.max(1, history.length)).padStart(3, '0');
     const ext = type === 'video' ? 'mp4' : 'png';
     const filename = `${type === 'video' ? 'video' : 'image'}-${day}-${month}-${year}_${hours}-${minutes}-${seconds}-${seqNum}.${ext}`;
+
+    if (url.startsWith('data:')) {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return;
+    }
 
     fetch(url)
       .then(res => res.blob())
@@ -490,6 +563,56 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-purple-500 selection:text-white">
+      {/* Info Modal */}
+      {infoModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
+            <h3 className="text-lg font-bold mb-4">Creation Info</h3>
+            <div className="space-y-3 text-sm text-slate-300">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <strong className="text-slate-400">Prompt:</strong>
+                  <button 
+                    onClick={async (e) => {
+                      const btn = e.currentTarget;
+                      const originalText = btn.innerHTML;
+                      await navigator.clipboard.writeText(infoModal.prompt);
+                      btn.innerHTML = '<span class="flex items-center space-x-1 text-emerald-400"><svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span>Tersalin!</span></span>';
+                      setTimeout(() => { btn.innerHTML = originalText; }, 2000);
+                    }}
+                    className="text-xs bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded flex items-center space-x-1 transition-all"
+                  >
+                    <Copy className="h-3 w-3" />
+                    <span>Copy</span>
+                  </button>
+                </div>
+                <pre className="bg-slate-950 p-3 rounded-lg text-xs font-mono text-slate-400 whitespace-pre-wrap border border-slate-800">{infoModal.prompt}</pre>
+              </div>
+              <p><strong>Size:</strong> {infoModal.size || 'N/A'}</p>
+              <p><strong>Steps:</strong> {infoModal.steps || 'N/A'}</p>
+              <p><strong>LoRA Scale:</strong> {infoModal.loraScale || 'N/A'}</p>
+              <p><strong>Seed:</strong> {infoModal.seed}</p>
+              <p><strong>Timestamp:</strong> {infoModal.timestamp}</p>
+            </div>
+            <button onClick={() => setInfoModal(null)} className="mt-6 w-full py-2 bg-slate-800 hover:bg-slate-700 rounded-lg">Close</button>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl">
+            <h3 className="text-lg font-bold mb-2 text-red-400">{confirmModal.title}</h3>
+            <p className="text-sm text-slate-300 mb-6">{confirmModal.message}</p>
+            <div className="flex space-x-3">
+              <button onClick={() => setConfirmModal(prev => ({...prev, isOpen: false}))} className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg">Cancel</button>
+              <button onClick={() => { confirmModal.onConfirm(); setConfirmModal(prev => ({...prev, isOpen: false})); }} className="flex-1 py-2 bg-red-600 hover:bg-red-500 rounded-lg">Confirm</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Header */}
       <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-40 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center space-x-3">
@@ -506,7 +629,7 @@ export default function App() {
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              Linked with <a href="https://huggingface.co/spaces/vclnhihihi/qwen-image-21-uncensored" target="_blank" rel="noreferrer" className="text-purple-400 hover:underline">Qwen-Image-2.1</a> & <a href="https://huggingface.co/spaces/rdata92/LTX-2.3-10Eros" target="_blank" rel="noreferrer" className="text-pink-400 hover:underline">LTX-2.3 Video</a>
+              Linked with <a href="https://huggingface.co/spaces/FelyaHuhing/qwen-image-21-uncensored" target="_blank" rel="noreferrer" className="text-purple-400 hover:underline">Qwen-Image-2.1</a> & <a href="https://huggingface.co/spaces/rdata92/LTX-2.3-10Eros" target="_blank" rel="noreferrer" className="text-pink-400 hover:underline">LTX-2.3 Video</a>
             </p>
           </div>
         </div>
@@ -589,15 +712,82 @@ export default function App() {
                 >
                   Create New
                 </button>
-                {history.length > 0 && (
-                  <button
-                    onClick={() => {
-                      if (confirm('Are you sure you want to clear all history?')) setHistory([]);
-                    }}
-                    className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl text-sm font-medium transition"
-                  >
-                    Clear History
-                  </button>
+                {history.length > 0 && !isSelectMode && (
+                  <>
+                    <button
+                      onClick={() => setIsSelectMode(true)}
+                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-sm font-medium transition"
+                    >
+                      Select
+                    </button>
+                    <button
+                      onClick={() => {
+                        setConfirmModal({
+                          isOpen: true,
+                          title: 'Clear All History',
+                          message: 'Are you sure you want to clear all history? This action cannot be undone.',
+                          onConfirm: async () => {
+                            const { clearHistory } = await import('./utils/db');
+                            await clearHistory();
+                            setHistory([]);
+                            setSelectedIds([]);
+                          }
+                        });
+                      }}
+                      className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl text-sm font-medium transition"
+                    >
+                      Clear History
+                    </button>
+                  </>
+                )}
+                {history.length > 0 && isSelectMode && (
+                  <>
+                    <button
+                      onClick={() => {
+                        if (selectedIds.length === history.length) {
+                          setSelectedIds([]);
+                        } else {
+                          setSelectedIds(history.map(item => item.id));
+                        }
+                      }}
+                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-sm font-medium transition"
+                    >
+                      {selectedIds.length === history.length ? 'Deselect All' : 'Select All'}
+                    </button>
+                    {selectedIds.length > 0 && (
+                      <button
+                        onClick={() => {
+                          setConfirmModal({
+                            isOpen: true,
+                            title: `Delete Selected (${selectedIds.length})`,
+                            message: `Are you sure you want to delete ${selectedIds.length} selected item(s)? This action cannot be undone.`,
+                            onConfirm: async () => {
+                              const { deleteHistoryItem } = await import('./utils/db');
+                              for (const id of selectedIds) {
+                                await deleteHistoryItem(id);
+                              }
+                              setHistory(prev => prev.filter(h => !selectedIds.includes(h.id)));
+                              setSelectedIds([]);
+                              setIsSelectMode(false);
+                            }
+                          });
+                        }}
+                        className="px-3.5 py-2 bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/30 rounded-xl text-sm font-medium transition flex items-center space-x-1.5"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        <span>Delete ({selectedIds.length})</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setIsSelectMode(false);
+                        setSelectedIds([]);
+                      }}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-medium transition"
+                    >
+                      Done
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -625,7 +815,50 @@ export default function App() {
                       ) : (
                         <img src={item.imageUrl} alt={item.prompt} className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
                       )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent opacity-0 group-hover:opacity-100 transition flex items-end p-4">
+                      {isSelectMode && (
+                        <div className="absolute top-2 left-2 z-50">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(item.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedIds(prev => [...prev, item.id]);
+                              } else {
+                                setSelectedIds(prev => prev.filter(id => id !== item.id));
+                              }
+                            }}
+                            className="h-4 w-4 rounded bg-slate-950 border-slate-700 text-purple-600 focus:ring-purple-500 cursor-pointer shadow"
+                          />
+                        </div>
+                      )}
+                      <div className="absolute top-2 right-2 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition z-50">
+                        <button
+                          onClick={() => setInfoModal(item)}
+                          className="p-2 bg-slate-950/80 hover:bg-slate-950 text-blue-400 rounded-lg backdrop-blur shadow"
+                          title="Info"
+                        >
+                          <AlertCircle className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setConfirmModal({
+                              isOpen: true,
+                              title: 'Delete Item',
+                              message: 'Are you sure you want to delete this item? This action cannot be undone.',
+                              onConfirm: async () => {
+                                const { deleteHistoryItem } = await import('./utils/db');
+                                await deleteHistoryItem(item.id);
+                                setHistory(prev => prev.filter(h => h.id !== item.id));
+                              }
+                            });
+                          }}
+                          className="p-2 bg-slate-950/80 hover:bg-red-950 text-red-400 rounded-lg backdrop-blur shadow"
+                          title="Hapus"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent opacity-0 group-hover:opacity-100 transition flex items-end p-4 z-40">
                         <div className="flex space-x-2 w-full">
                           <button
                             onClick={() => downloadMedia(item.type === 'video' ? item.videoUrl! : item.imageUrl!, item.type === 'video' ? 'video' : 'image', index)}
@@ -633,6 +866,30 @@ export default function App() {
                           >
                             <Download className="h-3.5 w-3.5" />
                             <span>Download</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (item.imageUrl) {
+                                setMainImage(item.imageUrl);
+                                setActiveTab('edit');
+                              }
+                            }}
+                            className="p-2 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-400 rounded-lg transition"
+                            title="Edit"
+                          >
+                            <Layers className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (item.imageUrl) {
+                                setVidImage(item.imageUrl);
+                                setActiveTab('video');
+                              }
+                            }}
+                            className="p-2 bg-pink-600/20 hover:bg-pink-600/40 text-pink-400 rounded-lg transition"
+                            title="Generate Video"
+                          >
+                            <Film className="h-3.5 w-3.5" />
                           </button>
                           <button
                             onClick={() => setFullScreenMedia({ url: item.type === 'video' ? item.videoUrl! : item.imageUrl!, type: item.type === 'video' ? 'video' : 'image' })}
@@ -669,14 +926,25 @@ export default function App() {
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5 shadow-xl">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-semibold text-slate-200">Prompt Description</label>
-                    <button
-                      onClick={() => handleEnhancePrompt(false, false)}
-                      disabled={isEnhancing || !prompt.trim()}
-                      className="text-xs text-purple-400 hover:text-purple-300 flex items-center space-x-1 disabled:opacity-50"
-                    >
-                      <Sparkles className="h-3 w-3" />
-                      <span>{isEnhancing ? 'Enhancing...' : 'AI Enhance Prompt'}</span>
-                    </button>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => handleEnhancePrompt(false, false)}
+                        disabled={isEnhancing || !prompt.trim()}
+                        className="text-xs text-purple-400 hover:text-purple-300 flex items-center space-x-1 disabled:opacity-50"
+                      >
+                        <Sparkles className="h-3 w-3" />
+                        <span>{isEnhancing ? 'Enhancing...' : 'AI Enhance Prompt'}</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(prompt);
+                        }}
+                        className="text-xs text-slate-400 hover:text-white flex items-center space-x-1"
+                      >
+                        <Copy className="h-3 w-3" />
+                        <span>Copy</span>
+                      </button>
+                    </div>
                   </div>
                   <textarea
                     rows={4}
@@ -791,6 +1059,18 @@ export default function App() {
                 /* Edit Form */
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5 shadow-xl">
                   <div>
+                    <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Select Edit Space</label>
+                    <select
+                      value={editSpace}
+                      onChange={(e) => setEditSpace(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-purple-500"
+                    >
+                      <option value="FelyaHuhing/qwen-image-21-uncensored">Qwen-Image-2.1 Uncensored (Standard)</option>
+                      <option value="bennie2390/Qwen-Image-Edit-Rapid-AIO-Loras-Experimental">Qwen-Image-Edit Rapid AIO & LoRAs (Experimental)</option>
+                    </select>
+                  </div>
+
+                  <div>
                     <label className="text-sm font-semibold text-slate-200 mb-2 block">Main Reference Image</label>
                     {mainImage ? (
                       <div className="relative aspect-video rounded-xl overflow-hidden bg-slate-950 border border-slate-800 group">
@@ -803,9 +1083,13 @@ export default function App() {
                         </button>
                       </div>
                     ) : (
-                      <label className="border-2 border-dashed border-slate-700 hover:border-purple-500 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer bg-slate-950/50 transition">
+                      <label 
+                        onDragOver={handleDragOver}
+                        onDrop={(e) => handleDrop(e, setMainImage)}
+                        className="border-2 border-dashed border-slate-700 hover:border-purple-500 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer bg-slate-950/50 transition"
+                      >
                         <ImageIcon className="h-8 w-8 text-slate-500 mb-2" />
-                        <span className="text-sm text-slate-300 font-medium">Upload main image</span>
+                        <span className="text-sm text-slate-300 font-medium">Upload or Drop main image</span>
                         <span className="text-xs text-slate-500 mt-1">PNG, JPG up to 20MB</span>
                         <input type="file" accept="image/*" onChange={handleMainImageUpload} className="hidden" />
                       </label>
@@ -827,7 +1111,11 @@ export default function App() {
                         </div>
                       ))}
                       {extraImages.length < 9 && (
-                        <label className="border border-dashed border-slate-700 hover:border-purple-500 rounded-lg aspect-square flex flex-col items-center justify-center cursor-pointer bg-slate-950/50 transition">
+                        <label 
+                          onDragOver={handleDragOver}
+                          onDrop={handleExtraDrop}
+                          className="border border-dashed border-slate-700 hover:border-purple-500 rounded-lg aspect-square flex flex-col items-center justify-center cursor-pointer bg-slate-950/50 transition"
+                        >
                           <Plus className="h-5 w-5 text-slate-500" />
                           <input type="file" accept="image/*" multiple onChange={handleExtraImagesUpload} className="hidden" />
                         </label>
@@ -859,7 +1147,7 @@ export default function App() {
                       <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Steps ({editSteps})</label>
                       <input
                         type="range"
-                        min={8}
+                        min={editSpace === 'bennie2390/Qwen-Image-Edit-Rapid-AIO-Loras-Experimental' ? 1 : 8}
                         max={50}
                         value={editSteps}
                         onChange={(e) => setEditSteps(Number(e.target.value))}
@@ -916,9 +1204,13 @@ export default function App() {
                         </button>
                       </div>
                     ) : (
-                      <label className="border-2 border-dashed border-slate-700 hover:border-pink-500 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer bg-slate-950/50 transition">
+                      <label 
+                        onDragOver={handleDragOver}
+                        onDrop={(e) => handleDrop(e, setVidImage)}
+                        className="border-2 border-dashed border-slate-700 hover:border-pink-500 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer bg-slate-950/50 transition"
+                      >
                         <Film className="h-8 w-8 text-pink-400 mb-2" />
-                        <span className="text-sm text-slate-300 font-medium">Upload starting image</span>
+                        <span className="text-sm text-slate-300 font-medium">Upload or Drop starting image</span>
                         <span className="text-xs text-slate-500 mt-1">Required for LTX 2.3 Video</span>
                         <input type="file" accept="image/*" onChange={handleVidImageUpload} className="hidden" />
                       </label>
@@ -1089,6 +1381,26 @@ export default function App() {
                         className="w-full h-full object-contain"
                       />
                       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center space-x-4">
+                        <button
+                          onClick={() => {
+                            setMainImage(currentResult.imageUrl);
+                            setActiveTab('edit');
+                          }}
+                          className="p-3 bg-slate-900/80 hover:bg-slate-900 text-indigo-400 rounded-xl backdrop-blur transition shadow-lg transform hover:scale-105"
+                          title="Edit"
+                        >
+                          <Layers className="h-5 w-5" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setVidImage(currentResult.imageUrl);
+                            setActiveTab('video');
+                          }}
+                          className="p-3 bg-slate-900/80 hover:bg-slate-900 text-pink-400 rounded-xl backdrop-blur transition shadow-lg transform hover:scale-105"
+                          title="Generate Video"
+                        >
+                          <Film className="h-5 w-5" />
+                        </button>
                         <button
                           onClick={() => setFullScreenMedia({ url: currentResult.imageUrl, type: 'image' })}
                           className="p-3 bg-slate-900/80 hover:bg-slate-900 text-white rounded-xl backdrop-blur transition shadow-lg transform hover:scale-105"

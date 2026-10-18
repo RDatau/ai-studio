@@ -9,7 +9,7 @@ import { GoogleGenAI } from '@google/genai';
 dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SPACE_URL = 'vclnhihihi/qwen-image-21-uncensored';
+const SPACE_URL = 'FelyaHuhing/qwen-image-21-uncensored';
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -20,7 +20,10 @@ const ai = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null;
 
 // Helper to create Gradio client with optional token
 async function getGradioClient(token?: string) {
-  const options: any = {};
+  const options: any = {
+    // Increase timeout for slow Space responses (default is often too short)
+    timeout: 300000 // 5 minutes
+  };
   if (token && token.trim().length > 0) {
     options.hf_token = token.trim();
   }
@@ -65,7 +68,7 @@ async function executeWithTokenRotation<T>(
       const result = await fn(client, currentToken);
       return { result, usedToken: currentToken };
     } catch (err: any) {
-      console.warn(`Token index ${i + 1} failed:`, err.message || err);
+      console.error(`Token index ${i + 1} (masked: ${currentToken ? `${currentToken.substring(0, 4)}...` : 'Anon'}) failed:`, err);
       lastError = err;
       // If error is authentication/quota/rate limit or connection error, try next token
       continue;
@@ -130,14 +133,43 @@ app.post('/api/generate', async (req, res) => {
   }
 });
 
+async function executeWithTokenRotationForSpace<T>(
+  tokens: string[],
+  spaceUrl: string,
+  fn: (client: any, activeSpace: string, activeToken: string) => Promise<T>
+): Promise<{ result: T; usedToken: string }> {
+  const tokenList = tokens && tokens.length > 0 ? tokens.filter(t => t && t.trim().length > 0) : [''];
+  if (tokenList.length === 0) tokenList.push('');
+
+  let lastError: any = null;
+
+  for (let i = 0; i < tokenList.length; i++) {
+    const currentToken = tokenList[i];
+    try {
+      console.log(`Attempting connection to ${spaceUrl} with token index ${i + 1}/${tokenList.length} (${currentToken ? 'Custom Token' : 'Anonymous'})`);
+      const client = await Client.connect(spaceUrl, { timeout: 300000, ...(currentToken ? { hf_token: currentToken.trim() } : {}) });
+      const result = await fn(client, spaceUrl, currentToken);
+      return { result, usedToken: currentToken };
+    } catch (err: any) {
+      console.error(`Space ${spaceUrl} token index ${i + 1} failed:`, err);
+      lastError = err;
+      continue;
+    }
+  }
+
+  throw lastError || new Error(`All tokens failed for space ${spaceUrl}`);
+}
+
 // Edit Endpoint
 app.post('/api/edit', async (req, res) => {
   try {
-    const { prompt, image_data, extra_images, steps, seed, randomize_seed, lora_scale, tokens } = req.body;
+    const { prompt, image_data, extra_images, steps, seed, randomize_seed, lora_scale, tokens, space } = req.body;
 
     if (!prompt || !image_data) {
       return res.status(400).json({ error: 'Prompt and main image are required' });
     }
+
+    const targetSpace = space || 'FelyaHuhing/qwen-image-21-uncensored';
 
     // Convert base64 image or url to Blob/File for gradio client
     const mainImageBlob = await fetch(image_data).then(r => r.blob());
@@ -150,21 +182,49 @@ app.post('/api/edit', async (req, res) => {
       }
     }
 
+    const extraGalleryArray = extraBlobs.map(blob => ({
+      image: blob,
+      caption: null
+    }));
+
     const tokenArray: string[] = Array.isArray(tokens) ? tokens : (tokens ? [tokens] : []);
 
-    const { result, usedToken } = await executeWithTokenRotation(tokenArray, async (client) => {
-      // edit(prompt, input_image, extra_images, steps, seed, randomize_seed, lora_scale)
-      const response = await client.predict('/edit', {
-        prompt: prompt,
-        input_image: mainImageBlob,
-        extra_images: extraBlobs,
-        steps: Number(steps) || 28,
-        seed: Number(seed) || 0,
-        randomize_seed: Boolean(randomize_seed ?? true),
-        lora_scale: Number(lora_scale) || 1.0,
-      });
-
-      return response.data;
+    const { result, usedToken } = await executeWithTokenRotationForSpace(tokenArray, targetSpace, async (client, currentSpace) => {
+      if (currentSpace === 'bennie2390/Qwen-Image-Edit-Rapid-AIO-Loras-Experimental') {
+        const response = await client.predict('/infer', {
+          input_image_1: mainImageBlob,
+          input_image_2: null,
+          input_images_extra: extraGalleryArray,
+          prompt: prompt,
+          lora_adapter: "None",
+          seed: Number(seed) || 0,
+          randomize_seed: Boolean(randomize_seed ?? true),
+          guidance_scale: 1.0,
+          steps: Number(steps) || 28,
+          target_megapixels: 1.0,
+          extras_condition_only: true,
+          pad_to_canvas: true,
+          vae_tiling: false,
+          resolution_multiple: 32,
+          vae_ref_megapixels: 0.0,
+          decoder_vae: "qwen",
+          keep_decoder_2x: false,
+          highlight_protection: true,
+          highlight_protection_strength: 0.35,
+        });
+        return response.data;
+      } else {
+        const response = await client.predict('/edit', {
+          prompt: prompt,
+          input_image: mainImageBlob,
+          extra_images: extraGalleryArray,
+          steps: Number(steps) || 28,
+          seed: Number(seed) || 0,
+          randomize_seed: Boolean(randomize_seed ?? true),
+          lora_scale: Number(lora_scale) || 1.0,
+        });
+        return response.data;
+      }
     });
 
     const outputData = result;
@@ -203,8 +263,28 @@ app.post('/api/enhance-prompt', async (req, res) => {
       return res.json({ enhanced: prompt });
     }
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.1-flash-lite',
       contents: `You are an expert prompt engineer for Qwen-Image-2.1 uncensored generative AI. Enhance this prompt to be extremely descriptive, high-quality, artistic, and detailed for high-fidelity image generation, while maintaining the user's core intent. Return ONLY the enhanced prompt text without explanations: "${prompt}"`,
+      config: {
+        safetySettings: [
+          {
+            category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+            threshold: 'BLOCK_NONE',
+          },
+          {
+            category: 'HARM_CATEGORY_HATE_SPEECH',
+            threshold: 'BLOCK_NONE',
+          },
+          {
+            category: 'HARM_CATEGORY_HARASSMENT',
+            threshold: 'BLOCK_NONE',
+          },
+          {
+            category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+            threshold: 'BLOCK_NONE',
+          },
+        ]
+      }
     });
     const enhanced = response.text?.trim() || prompt;
     res.json({ enhanced });
