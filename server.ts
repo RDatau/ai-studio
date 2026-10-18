@@ -142,7 +142,7 @@ app.post('/api/edit', async (req, res) => {
     // Convert base64 image or url to Blob/File for gradio client
     const mainImageBlob = await fetch(image_data).then(r => r.blob());
     
-    const extraBlobs = [];
+    const extraBlobs: Blob[] = [];
     if (extra_images && Array.isArray(extra_images)) {
       for (const imgUrl of extra_images) {
         const blob = await fetch(imgUrl).then(r => r.blob());
