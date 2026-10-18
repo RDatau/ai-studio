@@ -10,19 +10,16 @@ dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SPACE_URL = 'FelyaHuhing/qwen-image-21-uncensored';
+const VIDEO_SPACE_URL = 'rdata92/LTX-2.3-10Eros';
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
-// Initialize Google GenAI client if GEMINI_API_KEY is available (for prompt enhancement feature)
-const geminiApiKey = process.env.GEMINI_API_KEY;
-const ai = geminiApiKey ? new GoogleGenAI({ apiKey: geminiApiKey }) : null;
 
-// Helper to create Gradio client with optional token
+
 async function getGradioClient(token?: string) {
   const options: any = {
-    // Increase timeout for slow Space responses (default is often too short)
-    timeout: 300000 // 5 minutes
+    timeout: 300000
   };
   if (token && token.trim().length > 0) {
     options.hf_token = token.trim();
@@ -30,7 +27,6 @@ async function getGradioClient(token?: string) {
   return await Client.connect(SPACE_URL, options as any);
 }
 
-// Test token validity endpoint
 app.post('/api/test-token', async (req, res) => {
   const { token } = req.body;
   if (!token || !token.trim()) {
@@ -38,9 +34,7 @@ app.post('/api/test-token', async (req, res) => {
   }
 
   try {
-    // Test connection to the Space with the provided token
     const client = await getGradioClient(token);
-    // Try to get service status or api info
     const apiInfo = await client.view_api();
     return res.json({ success: true, apiInfo: { named_endpoints: Object.keys(apiInfo.named_endpoints || {}) } });
   } catch (error: any) {
@@ -49,62 +43,120 @@ app.post('/api/test-token', async (req, res) => {
   }
 });
 
-// Helper for rotating token execution
+// Global trackers for token rotation persistence across requests
+let lastWorkingTokenIndex = 0;
+let lastWorkingGeminiKeyIndex = 0;
+
 async function executeWithTokenRotation<T>(
   tokens: string[],
-  fn: (client: any, activeToken: string) => Promise<T>
-): Promise<{ result: T; usedToken: string }> {
-  // If no tokens provided, try with empty token (anonymous)
+  fn: (client: any, activeToken: string) => Promise<T>,
+  onStatus?: (msg: string) => void
+): Promise<{ result: T; usedToken: string; index: number }> {
   const tokenList = tokens && tokens.length > 0 ? tokens.filter(t => t && t.trim().length > 0) : [''];
   if (tokenList.length === 0) tokenList.push('');
 
-  let lastError: any = null;
-
-  for (let i = 0; i < tokenList.length; i++) {
+  // Start from the last working index, wrapping around
+  const startIdx = lastWorkingTokenIndex % tokenList.length;
+  
+  for (let attempt = 0; attempt < tokenList.length; attempt++) {
+    const i = (startIdx + attempt) % tokenList.length;
     const currentToken = tokenList[i];
+    const masked = currentToken ? `${currentToken.substring(0, 4)}...${currentToken.slice(-4)}` : 'Anonymous (No Token)';
     try {
-      console.log(`Attempting connection with token index ${i + 1}/${tokenList.length} (${currentToken ? 'Custom Token' : 'Anonymous'})`);
+      onStatus?.(`Connecting to Hugging Face Space (Token #${i + 1}/${tokenList.length} [${masked}])...`);
       const client = await getGradioClient(currentToken);
+      onStatus?.(`Generating using ZeroGPU with Token #${i + 1} (${masked})...`);
       const result = await fn(client, currentToken);
-      return { result, usedToken: currentToken };
+      onStatus?.(`Generation successful with Token #${i + 1}!`);
+      
+      // Update global tracker
+      lastWorkingTokenIndex = i;
+      
+      return { result, usedToken: currentToken, index: i };
     } catch (err: any) {
-      console.error(`Token index ${i + 1} (masked: ${currentToken ? `${currentToken.substring(0, 4)}...` : 'Anon'}) failed:`, err);
-      lastError = err;
-      // If error is authentication/quota/rate limit or connection error, try next token
+      console.error(`Token index ${i + 1} failed:`, err);
+      onStatus?.(`Token #${i + 1} quota/limit reached or failed. Rotating to next token...`);
       continue;
     }
   }
 
-  throw lastError || new Error('All configured Hugging Face tokens failed or hit rate limits.');
+  throw new Error('All configured Hugging Face tokens failed or hit rate limits.');
 }
 
-// Generate Endpoint
-app.post('/api/generate', async (req, res) => {
+async function executeWithTokenRotationForSpace<T>(
+  tokens: string[],
+  spaceUrl: string,
+  fn: (client: any, activeSpace: string, activeToken: string) => Promise<T>,
+  onStatus?: (msg: string) => void
+): Promise<{ result: T; usedToken: string; index: number }> {
+  const tokenList = tokens && tokens.length > 0 ? tokens.filter(t => t && t.trim().length > 0) : [''];
+  if (tokenList.length === 0) tokenList.push('');
+
+  // Start from the last working index, wrapping around
+  const startIdx = lastWorkingTokenIndex % tokenList.length;
+
+  for (let attempt = 0; attempt < tokenList.length; attempt++) {
+    const i = (startIdx + attempt) % tokenList.length;
+    const currentToken = tokenList[i];
+    const masked = currentToken ? `${currentToken.substring(0, 4)}...${currentToken.slice(-4)}` : 'Anonymous (No Token)';
+    try {
+      onStatus?.(`Connecting to Space ${spaceUrl} (Token #${i + 1}/${tokenList.length} [${masked}])...`);
+      const client = await Client.connect(spaceUrl, { timeout: 300000, ...(currentToken ? { hf_token: currentToken.trim() } : {}) } as any);
+      onStatus?.(`Generating using ZeroGPU (Token #${i + 1})...`);
+      const result = await fn(client, spaceUrl, currentToken);
+      onStatus?.(`Generation successful with Token #${i + 1}!`);
+      
+      // Update global tracker
+      lastWorkingTokenIndex = i;
+      
+      return { result, usedToken: currentToken, index: i };
+    } catch (err: any) {
+      console.error(`Space ${spaceUrl} token index ${i + 1} failed:`, err);
+      onStatus?.(`Token #${i + 1} failed or hit quota. Rotating to next token...`);
+      continue;
+    }
+  }
+
+  throw new Error(`All tokens failed for space ${spaceUrl}`);
+}
+
+// Generate Stream Endpoint (SSE)
+app.post('/api/generate-stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  const send = (data: any) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
   try {
     const { prompt, size, steps, seed, randomize_seed, lora_scale, tokens } = req.body;
-
     if (!prompt) {
-      return res.status(400).json({ error: 'Prompt is required' });
+      send({ success: false, error: 'Prompt is required' });
+      return res.end();
     }
 
+    send({ status: 'Preparing data payload...' });
     const tokenArray: string[] = Array.isArray(tokens) ? tokens : (tokens ? [tokens] : []);
 
-    const { result, usedToken } = await executeWithTokenRotation(tokenArray, async (client) => {
-      // Based on app.py: generate(prompt, size, steps, seed, randomize_seed, lora_scale)
-      // returns [image, seed]
-      const response = await client.predict('/generate', {
-        prompt: prompt,
-        size: size || '1024x1024 (1:1)',
-        steps: Number(steps) || 28,
-        seed: Number(seed) || 0,
-        randomize_seed: Boolean(randomize_seed ?? true),
-        lora_scale: Number(lora_scale) || 1.0,
-      });
+    const { result, usedToken } = await executeWithTokenRotation(
+      tokenArray,
+      async (client) => {
+        const response = await client.predict('/generate', {
+          prompt: prompt,
+          size: size || '1024x1024 (1:1)',
+          steps: Number(steps) || 28,
+          seed: Number(seed) || 0,
+          randomize_seed: Boolean(randomize_seed ?? true),
+          lora_scale: Number(lora_scale) || 1.0,
+        });
+        return response.data;
+      },
+      (msg) => send({ status: msg })
+    );
 
-      return response.data;
-    });
-
-    // Gradio client returns data array: [ { url, path, ... }, seed ]
+    send({ status: 'Processing generated image output...' });
     const outputData = result;
     let imageUrl = '';
     let usedSeed = seed;
@@ -121,57 +173,39 @@ app.post('/api/generate', async (req, res) => {
       }
     }
 
-    res.json({
+    send({
       success: true,
       imageUrl,
       seed: usedSeed,
       usedTokenMasked: usedToken ? `${usedToken.substring(0, 6)}...${usedToken.slice(-4)}` : 'Anonymous'
     });
+    res.end();
   } catch (error: any) {
-    console.error('Generation error:', error);
-    res.status(500).json({ success: false, error: error.message || 'Failed to generate image via Hugging Face Space' });
+    console.error('Generation stream error:', error);
+    send({ success: false, error: error.message || 'Failed to generate image' });
+    res.end();
   }
 });
 
-async function executeWithTokenRotationForSpace<T>(
-  tokens: string[],
-  spaceUrl: string,
-  fn: (client: any, activeSpace: string, activeToken: string) => Promise<T>
-): Promise<{ result: T; usedToken: string }> {
-  const tokenList = tokens && tokens.length > 0 ? tokens.filter(t => t && t.trim().length > 0) : [''];
-  if (tokenList.length === 0) tokenList.push('');
+// Edit Stream Endpoint (SSE)
+app.post('/api/edit-stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
 
-  let lastError: any = null;
+  const send = (data: any) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
 
-  for (let i = 0; i < tokenList.length; i++) {
-    const currentToken = tokenList[i];
-    try {
-      console.log(`Attempting connection to ${spaceUrl} with token index ${i + 1}/${tokenList.length} (${currentToken ? 'Custom Token' : 'Anonymous'})`);
-      const client = await Client.connect(spaceUrl, { timeout: 300000, ...(currentToken ? { hf_token: currentToken.trim() } : {}) } as any);
-      const result = await fn(client, spaceUrl, currentToken);
-      return { result, usedToken: currentToken };
-    } catch (err: any) {
-      console.error(`Space ${spaceUrl} token index ${i + 1} failed:`, err);
-      lastError = err;
-      continue;
-    }
-  }
-
-  throw lastError || new Error(`All tokens failed for space ${spaceUrl}`);
-}
-
-// Edit Endpoint
-app.post('/api/edit', async (req, res) => {
   try {
     const { prompt, image_data, extra_images, steps, seed, randomize_seed, lora_scale, tokens, space } = req.body;
-
     if (!prompt || !image_data) {
-      return res.status(400).json({ error: 'Prompt and main image are required' });
+      send({ success: false, error: 'Prompt and main image are required' });
+      return res.end();
     }
 
+    send({ status: 'Preparing reference image & pushing to Hugging Face...' });
     const targetSpace = space || 'FelyaHuhing/qwen-image-21-uncensored';
-
-    // Convert base64 image or url to Blob/File for gradio client
     const mainImageBlob = await fetch(image_data).then(r => r.blob());
     
     const extraBlobs: Blob[] = [];
@@ -189,44 +223,50 @@ app.post('/api/edit', async (req, res) => {
 
     const tokenArray: string[] = Array.isArray(tokens) ? tokens : (tokens ? [tokens] : []);
 
-    const { result, usedToken } = await executeWithTokenRotationForSpace(tokenArray, targetSpace, async (client, currentSpace) => {
-      if (currentSpace === 'bennie2390/Qwen-Image-Edit-Rapid-AIO-Loras-Experimental') {
-        const response = await client.predict('/infer', {
-          input_image_1: mainImageBlob,
-          input_image_2: null,
-          input_images_extra: extraGalleryArray,
-          prompt: prompt,
-          lora_adapter: "None",
-          seed: Number(seed) || 0,
-          randomize_seed: Boolean(randomize_seed ?? true),
-          guidance_scale: 1.0,
-          steps: Number(steps) || 28,
-          target_megapixels: 1.0,
-          extras_condition_only: true,
-          pad_to_canvas: true,
-          vae_tiling: false,
-          resolution_multiple: 32,
-          vae_ref_megapixels: 0.0,
-          decoder_vae: "qwen",
-          keep_decoder_2x: false,
-          highlight_protection: true,
-          highlight_protection_strength: 0.35,
-        });
-        return response.data;
-      } else {
-        const response = await client.predict('/edit', {
-          prompt: prompt,
-          input_image: mainImageBlob,
-          extra_images: extraGalleryArray,
-          steps: Number(steps) || 28,
-          seed: Number(seed) || 0,
-          randomize_seed: Boolean(randomize_seed ?? true),
-          lora_scale: Number(lora_scale) || 1.0,
-        });
-        return response.data;
-      }
-    });
+    const { result, usedToken } = await executeWithTokenRotationForSpace(
+      tokenArray,
+      targetSpace,
+      async (client, currentSpace) => {
+        if (currentSpace === 'bennie2390/Qwen-Image-Edit-Rapid-AIO-Loras-Experimental') {
+          const response = await client.predict('/infer', {
+            input_image_1: mainImageBlob,
+            input_image_2: null,
+            input_images_extra: extraGalleryArray,
+            prompt: prompt,
+            lora_adapter: "None",
+            seed: Number(seed) || 0,
+            randomize_seed: Boolean(randomize_seed ?? true),
+            guidance_scale: 1.0,
+            steps: Number(steps) || 28,
+            target_megapixels: 1.0,
+            extras_condition_only: true,
+            pad_to_canvas: true,
+            vae_tiling: false,
+            resolution_multiple: 32,
+            vae_ref_megapixels: 0.0,
+            decoder_vae: "qwen",
+            keep_decoder_2x: false,
+            highlight_protection: true,
+            highlight_protection_strength: 0.35,
+          });
+          return response.data;
+        } else {
+          const response = await client.predict('/edit', {
+            prompt: prompt,
+            input_image: mainImageBlob,
+            extra_images: extraGalleryArray,
+            steps: Number(steps) || 28,
+            seed: Number(seed) || 0,
+            randomize_seed: Boolean(randomize_seed ?? true),
+            lora_scale: Number(lora_scale) || 1.0,
+          });
+          return response.data;
+        }
+      },
+      (msg) => send({ status: msg })
+    );
 
+    send({ status: 'Processing edited image output...' });
     const outputData = result;
     let imageUrl = '';
     let usedSeed = seed;
@@ -243,41 +283,30 @@ app.post('/api/edit', async (req, res) => {
       }
     }
 
-    res.json({
+    send({
       success: true,
       imageUrl,
       seed: usedSeed,
       usedTokenMasked: usedToken ? `${usedToken.substring(0, 6)}...${usedToken.slice(-4)}` : 'Anonymous'
     });
+    res.end();
   } catch (error: any) {
-    console.error('Edit error:', error);
-    res.status(500).json({ success: false, error: error.message || 'Failed to edit image via Hugging Face Space' });
+    console.error('Edit stream error:', error);
+    send({ success: false, error: error.message || 'Failed to edit image' });
+    res.end();
   }
 });
 
-// Optional AI Prompt Enhancer endpoint using Google GenAI if available
-app.post('/api/enhance-prompt', async (req, res) => {
-  try {
-    const { prompt } = req.body;
-    if (!ai) {
-      return res.json({ enhanced: prompt });
-    }
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: `You are an expert prompt engineer for Qwen-Image-2.1 uncensored generative AI. Enhance this prompt to be extremely descriptive, high-quality, artistic, and detailed for high-fidelity image generation, while maintaining the user's core intent. Return ONLY the enhanced prompt text without explanations: "${prompt}"`,
-    });
-    const enhanced = response.text?.trim() || prompt;
-    res.json({ enhanced });
-  } catch (err: any) {
-    console.error('Prompt enhancement error:', err);
-    res.json({ enhanced: req.body.prompt });
-  }
-});
+// Video Stream Endpoint (SSE)
+app.post('/api/video-stream', async (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
 
-// LTX 2.3 10Eros Image-to-Video Generation Endpoint
-const VIDEO_SPACE_URL = 'rdata92/LTX-2.3-10Eros';
+  const send = (data: any) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
 
-app.post('/api/video-generate', async (req, res) => {
   try {
     const {
       image_data,
@@ -299,34 +328,114 @@ app.post('/api/video-generate', async (req, res) => {
     } = req.body;
 
     if (!prompt || !image_data) {
-      return res.status(400).json({ error: 'Prompt and reference image are required for video generation' });
+      send({ success: false, error: 'Prompt and reference image are required for video generation' });
+      return res.end();
     }
 
+    send({ status: 'Preparing starting frame & pushing to Hugging Face...' });
     const imageBlob = await fetch(image_data).then(r => r.blob());
     const tokenArray: string[] = Array.isArray(tokens) ? tokens : (tokens ? [tokens] : []);
 
-    const { result, usedToken } = await executeWithTokenRotation(tokenArray, async (client) => {
-      const response = await client.predict('/generate', {
-        image_path: imageBlob,
-        prompt: prompt,
-        negative_prompt: negative_prompt || "bad quality, static, low quality",
-        preset: preset || "tuned",
-        seconds: Number(seconds) || 4.0,
-        max_width: Number(max_width) || 1120,
-        max_height: Number(max_height) || 1344,
-        mode: mode || "anchor only",
-        face_bbox: face_bbox || "",
-        likeness_strength: Number(likeness_strength ?? 0.9),
-        likeness_anchor_strength: Number(likeness_anchor_strength ?? 0.15),
-        latent_anchor_strength: Number(latent_anchor_strength ?? 0.08),
-        first_frame_strength: Number(first_frame_strength ?? 0.82),
-        seed: Number(seed ?? -1),
-        randomize_seed: Boolean(randomize_seed ?? true),
-      });
+    const { result, usedToken } = await executeWithTokenRotationForSpace(
+      tokenArray,
+      VIDEO_SPACE_URL,
+      async (client) => {
+        const response = await client.predict('/generate', {
+          image_path: imageBlob,
+          prompt: prompt,
+          negative_prompt: negative_prompt || "captions, music, transition, VR, bad quality, subtitles, text, watermark, overlay effects, cartoon, childish, ugly, text, blur, logo, static, low quality, noise, mutant, horror, film grain",
+          preset: preset || "tuned",
+          seconds: Number(seconds) || 4.0,
+          max_width: Number(max_width) || 1120,
+          max_height: Number(max_height) || 1344,
+          mode: mode || "anchor only",
+          face_bbox: face_bbox || "",
+          likeness_strength: Number(likeness_strength ?? 0.9),
+          likeness_anchor_strength: Number(likeness_anchor_strength ?? 0.15),
+          latent_anchor_strength: Number(latent_anchor_strength ?? 0.08),
+          first_frame_strength: Number(first_frame_strength ?? 0.82),
+          seed: Number(seed ?? -1),
+          randomize_seed: Boolean(seed === -1 || randomize_seed),
+          gen_budget: 0,
+          target_mp: 1.15,
+          snap_multiple: 64,
+          custom_res_enabled: false,
+          sulphur_lora_strength: 0.15,
+          sulphur_v1_lora_strength: 0.15,
+          vbvr_lora_strength: 0.5,
+          dreamly_lora_strength: 0.6,
+          synth_lora_strength: 0.0,
+          plora_lora_strength: 0.0,
+          singularity_lora_strength: 0.3,
+          omninft_lora_strength: 0.8,
+          omninft_bf16_lora_strength: 0.0,
+          better_motion_lora_strength: 0.0,
+          physics_v2_lora_strength: 0.0,
+          hardcut_lora_strength: 0.0,
+          transition_lora_strength: 0.15,
+          sulphur_audio_strength: 0.15,
+          sulphur_v1_audio_strength: 0.15,
+          vbvr_audio_strength: 0.5,
+          dreamly_audio_strength: 0.6,
+          synth_audio_strength: 0.0,
+          plora_audio_strength: 0.0,
+          singularity_audio_strength: 0.3,
+          omninft_audio_strength: 0.8,
+          omninft_bf16_audio_strength: 0.0,
+          better_motion_audio_strength: 0.0,
+          physics_v2_audio_strength: 0.0,
+          hardcut_audio_strength: 0.0,
+          transition_audio_strength: 0.0,
+          cache_at_step: 0,
+          cache_warmup: 400,
+          energy_threshold: 0.3,
+          anchor_similarity_threshold: 0.3,
+          sigma_string: "0.4824, 0.2412, 0.0",
+          input_mode: "single image (i2v)",
+          msr_ref2: null,
+          msr_ref3: null,
+          msr_ref4: null,
+          msr_background: null,
+          msr_frame_count: 41,
+          msr_guide_strength: 1.0,
+          msr_lora_strength: 0.7,
+          prompt_relay_enabled: false,
+          prompt_segments: "",
+          scene_chain_enabled: false,
+          scene_chain_prompt: "",
+          scene_chain_max_scenes: 2,
+          scene_chain_frame_overlap: 8,
+          scene_chain_mid_guide: true,
+          scene_chain_mid_guide_strength: 0.25,
+          kv_enabled: false,
+          kv_strength: 1.0,
+          audio_ref_enabled: false,
+          audio_ref_file: null,
+          audio_ref_guidance_scale: 3.0,
+          audio_ref_stem_sep: false,
+          audio_ref_normalize: true,
+          kf_last_image: null,
+          kf_strength: 0.82,
+          kf_mid_enabled: false,
+          kf_mid_1_image: null,
+          kf_mid_1_pos: 50.0,
+          kf_mid_2_image: null,
+          kf_mid_2_pos: 50.0,
+          kf_mid_3_image: null,
+          kf_mid_3_pos: 50.0,
+          kf_mid_4_image: null,
+          kf_mid_4_pos: 50.0,
+          kf_mid_5_image: null,
+          kf_mid_5_pos: 50.0,
+          profile_name: "",
+          skip_refine: false,
+        });
+        return response.data;
+      },
+      (msg) => send({ status: msg })
+    );
 
-      return response.data;
-    });
-
+    send({ status: 'Processing rendered video output...' });
     const outputData = result;
     let videoUrl = '';
     let usedSeed = seed;
@@ -343,15 +452,59 @@ app.post('/api/video-generate', async (req, res) => {
       }
     }
 
-    res.json({
+    send({
       success: true,
       videoUrl,
       seed: usedSeed,
       usedTokenMasked: usedToken ? `${usedToken.substring(0, 6)}...${usedToken.slice(-4)}` : 'Anonymous'
     });
+    res.end();
   } catch (error: any) {
-    console.error('Video generation error:', error);
-    res.status(500).json({ success: false, error: error.message || 'Failed to generate video via Hugging Face Space LTX-2.3-10Eros' });
+    console.error('Video stream error:', error);
+    send({ success: false, error: error.message || 'Failed to generate video' });
+    res.end();
+  }
+});
+
+// AI Prompt Enhancer endpoint with Gemini API Key rotation (cycling)
+app.post('/api/enhance-prompt', async (req, res) => {
+  try {
+    const { prompt, keys } = req.body;
+    const keyList = Array.isArray(keys) ? keys : (typeof keys === 'string' ? keys.split('\n').map((k: string) => k.trim()).filter(Boolean) : []);
+
+    if (keyList.length === 0) {
+      return res.status(400).json({ success: false, error: 'No Gemini API keys provided. Please add your Gemini API Key in Settings.' });
+    }
+
+    // Start from the last working index, wrapping around
+    const startIdx = lastWorkingGeminiKeyIndex % keyList.length;
+
+    for (let attempt = 0; attempt < keyList.length; attempt++) {
+      const i = (startIdx + attempt) % keyList.length;
+      const apiKey = keyList[i];
+      try {
+        console.log(`Attempting prompt enhancement with Gemini API key #${i + 1}/${keyList.length}`);
+        const aiInstance = new GoogleGenAI({ apiKey });
+        const response = await aiInstance.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: `You are an expert prompt engineer for Qwen-Image-2.1 uncensored generative AI. Enhance this prompt to be extremely descriptive, high-quality, artistic, and detailed for high-fidelity image generation, while maintaining the user's core intent. Return ONLY the enhanced prompt text without explanations: "${prompt}"`,
+        });
+        const enhanced = response.text?.trim() || prompt;
+        
+        // Update global tracker
+        lastWorkingGeminiKeyIndex = i;
+        
+        return res.json({ enhanced, usedKeyIndex: i + 1 });
+      } catch (err: any) {
+        console.error(`Gemini API key #${i + 1} failed:`, err);
+        continue; // Try next Gemini key
+      }
+    }
+
+    return res.status(500).json({ success: false, error: 'All configured Gemini API keys failed or hit rate limits.' });
+  } catch (err: any) {
+    console.error('Prompt enhancement error:', err);
+    res.status(500).json({ success: false, error: err.message || 'Prompt enhancement failed' });
   }
 });
 

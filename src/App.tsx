@@ -105,6 +105,15 @@ export default function App() {
   const [testingTokenIdx, setTestingTokenIdx] = useState<number | null>(null);
   const [testingAll, setTestingAll] = useState(false);
 
+  // Gemini API Key state
+  const [geminiKeyInputText, setGeminiKeyInputText] = useState<string>('');
+
+  const handleGeminiKeyTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setGeminiKeyInputText(val);
+    localStorage.setItem('qwen_gemini_keys', val);
+  };
+
   const handleDragOver = (e: React.DragEvent) => e.preventDefault();
 
   const handleDrop = async (e: React.DragEvent, setter: (val: string) => void) => {
@@ -179,6 +188,11 @@ export default function App() {
     if (savedTokens) {
       setTokenInputText(savedTokens);
       updateTokenStatuses(savedTokens);
+    }
+
+    const savedGeminiKeys = localStorage.getItem('qwen_gemini_keys');
+    if (savedGeminiKeys) {
+      setGeminiKeyInputText(savedGeminiKeys);
     }
     
     import('./utils/db').then(async ({ getHistory }) => {
@@ -260,42 +274,47 @@ export default function App() {
     return tokenInputText.split('\n').map(l => l.trim()).filter(Boolean);
   };
 
-  // Enhance prompt with Gemini
+  // Enhance prompt with Gemini using user keys with cycle rotation
   const handleEnhancePrompt = async (isEdit: boolean = false, isVideo: boolean = false) => {
     const targetPrompt = isVideo ? vidPrompt : (isEdit ? editPrompt : prompt);
     if (!targetPrompt.trim()) return;
     setIsEnhancing(true);
     try {
+      const keys = geminiKeyInputText.split('\n').map(l => l.trim()).filter(Boolean);
       const res = await fetch('/api/enhance-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: targetPrompt })
+        body: JSON.stringify({ prompt: targetPrompt, keys })
       });
       const data = await res.json();
+      if (!data.success && data.error) {
+        alert(data.error);
+        return;
+      }
       if (data.enhanced) {
         if (isVideo) setVidPrompt(data.enhanced);
         else if (isEdit) setEditPrompt(data.enhanced);
         else setPrompt(data.enhanced);
       }
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      alert(`Error enhancing prompt: ${e.message || 'Failed'}`);
     } finally {
       setIsEnhancing(false);
     }
   };
 
-  // Generate Image
+  // Generate Image with real-time stream status
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       alert('Please enter a prompt.');
       return;
     }
     setIsLoading(true);
-    setLoadingMessage('Initializing Qwen-Image-2.1 with Uncensored LoRA (ZeroGPU)...');
+    setLoadingMessage('Preparing data & initializing connection...');
 
     try {
       const tokens = getTokensArray();
-      const res = await fetch('/api/generate', {
+      const res = await fetch('/api/generate-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -309,17 +328,42 @@ export default function App() {
         })
       });
 
-      const data = await res.json();
-      if (!data.success) {
-        throw new Error(data.error || 'Generation failed');
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let finalData: any = null;
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.substring(6));
+                if (data.status) {
+                  setLoadingMessage(data.status);
+                }
+                if (data.success !== undefined) {
+                  finalData = data;
+                }
+              } catch (e) {}
+            }
+          }
+        }
       }
 
-      const pngBase64 = await convertToPngBase64(data.imageUrl);
+      if (!finalData || !finalData.success) {
+        throw new Error(finalData?.error || 'Generation failed');
+      }
+
+      const pngBase64 = await convertToPngBase64(finalData.imageUrl);
 
       const resultObj = {
         imageUrl: pngBase64,
-        seed: data.seed,
-        usedTokenMasked: data.usedTokenMasked || 'Anonymous'
+        seed: finalData.seed,
+        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
       };
       setCurrentResult(resultObj);
 
@@ -328,12 +372,12 @@ export default function App() {
         type: 'generate',
         imageUrl: pngBase64,
         prompt,
-        seed: data.seed,
+        seed: finalData.seed,
         steps,
         loraScale,
         size,
         timestamp: new Date().toISOString(),
-        usedTokenMasked: data.usedTokenMasked || 'Anonymous'
+        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
       };
       
       const { addHistoryItem } = await import('./utils/db');
@@ -348,7 +392,7 @@ export default function App() {
     }
   };
 
-  // Edit Image
+  // Edit Image with real-time stream status
   const handleEdit = async () => {
     if (!editPrompt.trim()) {
       alert('Please enter an edit instruction.');
@@ -360,11 +404,11 @@ export default function App() {
     }
 
     setIsLoading(true);
-    setLoadingMessage('Processing image editing via Qwen-Image-2.1 Uncensored...');
+    setLoadingMessage('Preparing reference image & pushing to Hugging Face...');
 
     try {
       const tokens = getTokensArray();
-      const res = await fetch('/api/edit', {
+      const res = await fetch('/api/edit-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -380,17 +424,42 @@ export default function App() {
         })
       });
 
-      const data = await res.json();
-      if (!data.success) {
-        throw new Error(data.error || 'Image editing failed');
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let finalData: any = null;
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.substring(6));
+                if (data.status) {
+                  setLoadingMessage(data.status);
+                }
+                if (data.success !== undefined) {
+                  finalData = data;
+                }
+              } catch (e) {}
+            }
+          }
+        }
       }
 
-      const pngBase64 = await convertToPngBase64(data.imageUrl);
+      if (!finalData || !finalData.success) {
+        throw new Error(finalData?.error || 'Image editing failed');
+      }
+
+      const pngBase64 = await convertToPngBase64(finalData.imageUrl);
 
       const resultObj = {
         imageUrl: pngBase64,
-        seed: data.seed,
-        usedTokenMasked: data.usedTokenMasked || 'Anonymous'
+        seed: finalData.seed,
+        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
       };
       setCurrentResult(resultObj);
 
@@ -399,11 +468,11 @@ export default function App() {
         type: 'edit',
         imageUrl: pngBase64,
         prompt: editPrompt,
-        seed: data.seed,
+        seed: finalData.seed,
         steps: editSteps,
         loraScale: editLoraScale,
         timestamp: new Date().toISOString(),
-        usedTokenMasked: data.usedTokenMasked || 'Anonymous'
+        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
       };
 
       const { addHistoryItem } = await import('./utils/db');
@@ -418,7 +487,7 @@ export default function App() {
     }
   };
 
-  // Generate Video (LTX 2.3)
+  // Generate Video (LTX 2.3) with real-time stream status
   const handleVideoGenerate = async () => {
     if (!vidPrompt.trim()) {
       alert('Please enter a prompt for video generation.');
@@ -430,11 +499,11 @@ export default function App() {
     }
 
     setIsLoading(true);
-    setLoadingMessage('Initializing LTX-2.3-10Eros Video Generation via ComfyUI (ZeroGPU)...');
+    setLoadingMessage('Preparing video reference data & pushing to Hugging Face...');
 
     try {
       const tokens = getTokensArray();
-      const res = await fetch('/api/video-generate', {
+      const res = await fetch('/api/video-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -452,26 +521,51 @@ export default function App() {
         })
       });
 
-      const data = await res.json();
-      if (!data.success) {
-        throw new Error(data.error || 'Video generation failed');
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let finalData: any = null;
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.substring(6));
+                if (data.status) {
+                  setLoadingMessage(data.status);
+                }
+                if (data.success !== undefined) {
+                  finalData = data;
+                }
+              } catch (e) {}
+            }
+          }
+        }
+      }
+
+      if (!finalData || !finalData.success) {
+        throw new Error(finalData?.error || 'Video generation failed');
       }
 
       const resultObj = {
-        videoUrl: data.videoUrl,
-        seed: data.seed,
-        usedTokenMasked: data.usedTokenMasked || 'Anonymous'
+        videoUrl: finalData.videoUrl,
+        seed: finalData.seed,
+        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
       };
       setCurrentVideoResult(resultObj);
 
       const historyItem: GenerationHistoryItem = {
         id: Math.random().toString(36).substring(2, 9),
         type: 'video',
-        videoUrl: data.videoUrl,
+        videoUrl: finalData.videoUrl,
         prompt: vidPrompt,
-        seed: data.seed,
+        seed: finalData.seed,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        usedTokenMasked: data.usedTokenMasked || 'Anonymous'
+        usedTokenMasked: finalData.usedTokenMasked || 'Anonymous'
       };
       setHistory(prev => [historyItem, ...prev]);
     } catch (err: any) {
@@ -1544,6 +1638,22 @@ export default function App() {
                     })
                   )}
                 </div>
+              </div>
+
+              <div className="border-t border-slate-800 pt-5">
+                <label className="text-sm font-medium text-slate-200 block mb-1">
+                  Gemini API Keys (One per line / Press Enter)
+                </label>
+                <p className="text-xs text-slate-400 mb-2">
+                  Used for AI Prompt Enhancement. Keys are automatically rotated (cycled) if rate limits or quota errors occur.
+                </p>
+                <textarea
+                  rows={4}
+                  value={geminiKeyInputText}
+                  onChange={handleGeminiKeyTextChange}
+                  placeholder="AIzaSy...&#10;AIzaSy..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-sm font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-purple-500 transition resize-none"
+                />
               </div>
             </div>
 
