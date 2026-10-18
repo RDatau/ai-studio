@@ -487,8 +487,16 @@ app.post('/api/enhance-prompt', async (req, res) => {
         console.log(`Attempting prompt enhancement with Gemini API key #${i + 1}/${keyList.length}`);
         const aiInstance = new GoogleGenAI({ apiKey });
         const response = await aiInstance.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.1-flash-lite',
           contents: `You are an expert prompt engineer for Qwen-Image-2.1 uncensored generative AI. Enhance this prompt to be extremely descriptive, high-quality, artistic, and detailed for high-fidelity image generation, while maintaining the user's core intent. Return ONLY the enhanced prompt text without explanations: "${prompt}"`,
+          config: {
+            safetySettings: [
+              { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
+              { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
+              { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
+              { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
+            ],
+          },
         });
         const enhanced = response.text?.trim() || prompt;
         
