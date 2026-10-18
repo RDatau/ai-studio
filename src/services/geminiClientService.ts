@@ -8,8 +8,10 @@ export const safetySettings = [
   { category: 'HARM_CATEGORY_CIVIC_INTEGRITY', threshold: 'BLOCK_NONE' },
 ];
 
-// Memory cache untuk tracking key yang sudah terdeteksi leaked/banned
-const bannedGeminiKeys = new Set<string>();
+// Memory cache untuk tracking key yang exhausted/rate-limited
+const exhaustedGeminiKeysMap = new Map<string, number>();
+const GEMINI_KEY_COOLDOWN_MS = 60 * 1000; // 60 detik cooldown
+let currentGeminiKeyIndex = 0;
 
 export const parseGeminiApiKeys = (input?: string): string[] => {
   if (!input) return [];
@@ -26,19 +28,62 @@ export const parseGeminiApiKeys = (input?: string): string[] => {
 export const getAllGeminiApiKeys = (pastedKeys?: string | string[]): string[] => {
   const envKey = process.env.GEMINI_API_KEY || '';
   const pastedStr = Array.isArray(pastedKeys) ? pastedKeys.join('\n') : (pastedKeys || '');
-  const combined = [pastedStr, envKey].join('\n');
+  const localCached = typeof localStorage !== 'undefined' ? (localStorage.getItem('qwen_gemini_keys') || '') : '';
+  const combined = [pastedStr, envKey, localCached].join('\n');
   const parsed = parseGeminiApiKeys(combined);
-  // Filter out banned keys
-  return Array.from(new Set(parsed)).filter(k => !bannedGeminiKeys.has(k));
+  return Array.from(new Set(parsed));
 };
 
-let lastWorkingGeminiKeyIndex = 0;
+export const getNextAvailableGeminiKey = (keys: string[]): { key: string; index: number } | null => {
+  if (!keys || keys.length === 0) return null;
+  const now = Date.now();
+  
+  for (const [key, timestamp] of exhaustedGeminiKeysMap.entries()) {
+    if (now - timestamp > GEMINI_KEY_COOLDOWN_MS) {
+      exhaustedGeminiKeysMap.delete(key);
+    }
+  }
+
+  for (let i = 0; i < keys.length; i++) {
+    const idx = (currentGeminiKeyIndex + i) % keys.length;
+    const candidate = keys[idx];
+    if (!exhaustedGeminiKeysMap.has(candidate)) {
+      currentGeminiKeyIndex = idx;
+      return { key: candidate, index: idx };
+    }
+  }
+
+  let oldestKey = keys[currentGeminiKeyIndex % keys.length];
+  let oldestTime = Infinity;
+  for (let i = 0; i < keys.length; i++) {
+    const candidate = keys[i];
+    const time = exhaustedGeminiKeysMap.get(candidate) || 0;
+    if (time < oldestTime) {
+      oldestTime = time;
+      oldestKey = candidate;
+      currentGeminiKeyIndex = i;
+    }
+  }
+  return { key: oldestKey, index: currentGeminiKeyIndex };
+};
+
+export const markGeminiKeyExhausted = (key: string) => {
+  if (key) {
+    exhaustedGeminiKeysMap.set(key, Date.now());
+  }
+};
+
+export const createGeminiClient = (apiKey?: string): GoogleGenAI => {
+  if (!apiKey) {
+    throw new Error("API Key Gemini belum diatur.");
+  }
+  return new GoogleGenAI({ apiKey });
+};
 
 export async function enhancePrompt(prompt: string, keys?: string | string[], imageBase64?: string | null): Promise<{ enhanced: string; usedKeyIndex: number }> {
-  const keyList = getAllGeminiApiKeys(keys);
-  console.log(`[DEBUG] enhancePrompt: Found ${keyList.length} valid keys.`);
-  if (keyList.length === 0) {
-    throw new Error('No valid Gemini API keys found. If you recently saw a "leaked" error, generate a new API key in Google AI Studio.');
+  const allKeys = getAllGeminiApiKeys(keys);
+  if (allKeys.length === 0) {
+    throw new Error('No valid Gemini API keys found.');
   }
 
   const instructions = `You are an expert AI Video Prompt & Audio Architect.
@@ -52,18 +97,13 @@ Mandatory Section: Add an 'Audio Intent' section describing:
 3. Background sounds/SFX fitting the visual scene and mood.
 Return ONLY the enhanced prompt followed by the 'Audio Intent' section.`;
 
-  const startIdx = lastWorkingGeminiKeyIndex % keyList.length;
-
-  for (let attempt = 0; attempt < keyList.length; attempt++) {
-    const i = (startIdx + attempt) % keyList.length;
-    const apiKey = keyList[i];
+  for (let attempt = 0; attempt < allKeys.length; attempt++) {
+    const keyObj = getNextAvailableGeminiKey(allKeys);
+    if (!keyObj) break;
+    const { key, index } = keyObj;
     
     try {
-      const aiInstance = new GoogleGenAI({ 
-        apiKey,
-        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
-      });
-
+      const aiInstance = createGeminiClient(key);
       const parts: any[] = [{ text: instructions }];
       if (imageBase64) {
         parts.push({
@@ -77,62 +117,35 @@ Return ONLY the enhanced prompt followed by the 'Audio Intent' section.`;
       const response = await aiInstance.models.generateContent({
         model: 'gemini-3.1-flash-lite',
         contents: parts,
-        config: {
-          safetySettings: safetySettings as any,
-        },
+        config: { safetySettings: safetySettings as any },
       });
-      const enhanced = response.text?.trim() || prompt;
-      lastWorkingGeminiKeyIndex = i;
-      return { enhanced, usedKeyIndex: i + 1 };
-    } catch (err: any) {
-      const msg = (err?.message || "").toLowerCase();
-      console.error(`Gemini key #${i + 1} (${apiKey.slice(0, 4)}...) failed:`, msg);
       
-      if (msg.includes('leaked') || msg.includes('403') || msg.includes('401') || msg.includes('permission_denied')) {
-        bannedGeminiKeys.add(apiKey);
-        console.error(`Gemini key #${i + 1} is banned and has been blacklisted.`);
-      }
+      return { enhanced: response.text?.trim() || prompt, usedKeyIndex: index + 1 };
+    } catch (err: any) {
+      console.error(`Gemini key #${index + 1} failed:`, err.message);
+      markGeminiKeyExhausted(key);
     }
   }
 
   throw new Error('All configured Gemini API keys failed (check for leaks/quota).');
 }
 
-export async function validateApiKey(apiKey: string): Promise<{ valid: boolean; message: string; activeKeyCount?: number }> {
-  if (!apiKey || !apiKey.trim()) {
-    return { valid: false, message: 'API Key kosong.' };
-  }
-  const keys = parseGeminiApiKeys(apiKey);
-  if (keys.length === 0) {
-    return { valid: false, message: 'Format API Key tidak valid.' };
-  }
+export async function validateApiKey(apiKeyInput: string): Promise<{ valid: boolean; message: string; activeKeyCount?: number }> {
+  const keys = parseGeminiApiKeys(apiKeyInput);
+  if (keys.length === 0) return { valid: false, message: 'API Key kosong.' };
 
   for (const k of keys) {
-    if (bannedGeminiKeys.has(k)) continue;
-
     try {
-      const ai = new GoogleGenAI({ 
-        apiKey: k,
-        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
-      });
-
+      const ai = createGeminiClient(k);
       await ai.models.generateContent({
         model: 'gemini-3.1-flash-lite',
         contents: [{ parts: [{ text: "hi" }] }],
         config: { safetySettings: safetySettings as any }
       });
-      return { valid: true, message: 'API Key valid! ✨ Siap digunakan.', activeKeyCount: keys.length };
+      return { valid: true, message: 'API Key valid! ✨', activeKeyCount: keys.length };
     } catch (err: any) {
-      const msg = (err?.message || "").toLowerCase();
-      if (msg.includes('leaked') || msg.includes('403') || msg.includes('401') || msg.includes('permission_denied')) {
-        bannedGeminiKeys.add(k);
-        return { valid: false, message: 'API Key ini telah dilaporkan bocor (leaked) oleh Google. Gunakan key baru.' };
-      }
-      if (msg.includes('429') || msg.includes('quota') || msg.includes('resource_exhausted')) {
-        return { valid: false, message: 'API Key valid, tapi kuota limit (429).' };
-      }
+      console.warn("API Validation Error for a key:", err.message);
     }
   }
-
   return { valid: false, message: 'API Key tidak valid atau tidak memiliki akses model.' };
 }
