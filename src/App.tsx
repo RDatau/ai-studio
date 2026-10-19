@@ -293,7 +293,13 @@ export default function App() {
       const res = await fetch('/api/enhance-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: targetPrompt, keys, lastWorkingIndex, image })
+        body: JSON.stringify({ 
+          prompt: targetPrompt, 
+          keys, 
+          lastWorkingIndex, 
+          image, 
+          mode: isVideo ? 'video' : (isEdit ? 'edit' : 'generate') 
+        })
       });
       const text = await res.text();
       if (!res.ok) {
@@ -640,82 +646,88 @@ export default function App() {
       )}
 
       {/* Top Header */}
-      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-40 px-6 py-4 flex items-center justify-between">
+      <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-40 px-4 sm:px-6 py-3.5 flex items-center justify-between">
         <div className="flex items-center space-x-3">
-          <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/30">
-            <Sparkles className="h-5 w-5 text-white animate-pulse" />
+          <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/30 shrink-0">
+            <Sparkles className="h-4 w-4 sm:h-5 sm:w-5 text-white animate-pulse" />
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <h1 className="font-bold text-lg bg-gradient-to-r from-purple-400 via-pink-300 to-white bg-clip-text text-transparent">
-                Qwen Image Studio Pro & Video
+              <h1 className="font-bold text-sm sm:text-lg bg-gradient-to-r from-purple-400 via-pink-300 to-white bg-clip-text text-transparent truncate max-w-[180px] sm:max-w-none">
+                Qwen Image Studio Pro
               </h1>
-              <span className="px-2 py-0.5 text-xs font-semibold bg-purple-500/20 text-purple-300 rounded-full border border-purple-500/30">
+              <span className="hidden sm:inline-block px-2 py-0.5 text-xs font-semibold bg-purple-500/20 text-purple-300 rounded-full border border-purple-500/30">
                 AI Studio
               </span>
             </div>
-            <p className="text-xs text-slate-400">
-              Linked with <a href="https://huggingface.co/spaces/FelyaHuhing/qwen-image-21-uncensored" target="_blank" rel="noreferrer" className="text-purple-400 hover:underline">Qwen-Image-2.1</a> & <a href="https://huggingface.co/spaces/rdata92/LTX-2.3-10Eros" target="_blank" rel="noreferrer" className="text-pink-400 hover:underline">LTX-2.3 Video</a>
+            <p className="text-[10px] sm:text-xs text-slate-400 truncate max-w-[200px] sm:max-w-none">
+              Linked with <span className="text-purple-400">Qwen-2.1</span> & <span className="text-pink-400">LTX-2.3</span>
             </p>
           </div>
         </div>
 
-        <div className="flex items-center space-x-3">
-          <PWAInstallButton />
-          <button
-            onClick={() => setActiveTab('generate')}
-            className={`px-3.5 py-2 rounded-xl border flex items-center space-x-2 text-sm font-medium transition ${
-              activeTab === 'generate'
-                ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-600/30'
-                : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
-            }`}
-          >
-            <Sparkles className="h-4 w-4" />
-            <span>Generate (T2I)</span>
-          </button>
+        <div className="flex items-center space-x-2 sm:space-x-3">
+          <div className="hidden md:flex items-center space-x-2">
+            <button
+              onClick={() => setActiveTab('generate')}
+              className={`px-3.5 py-2 rounded-xl border flex items-center space-x-2 text-sm font-medium transition ${
+                activeTab === 'generate'
+                  ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-600/30'
+                  : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
+              }`}
+            >
+              <Sparkles className="h-4 w-4" />
+              <span>Generate (T2I)</span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('edit')}
-            className={`px-3.5 py-2 rounded-xl border flex items-center space-x-2 text-sm font-medium transition ${
-              activeTab === 'edit'
-                ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-600/30'
-                : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
-            }`}
-          >
-            <Layers className="h-4 w-4" />
-            <span>Edit (I2I)</span>
-          </button>
+            <button
+              onClick={() => setActiveTab('edit')}
+              className={`px-3.5 py-2 rounded-xl border flex items-center space-x-2 text-sm font-medium transition ${
+                activeTab === 'edit'
+                  ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-600/30'
+                  : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
+              }`}
+            >
+              <Layers className="h-4 w-4" />
+              <span>Edit (I2I)</span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('video')}
-            className={`px-3.5 py-2 rounded-xl border flex items-center space-x-2 text-sm font-medium transition ${
-              activeTab === 'video'
-                ? 'bg-pink-600 border-pink-500 text-white shadow-lg shadow-pink-600/30'
-                : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
-            }`}
-          >
-            <Film className="h-4 w-4 text-pink-300" />
-            <span>Video (I2V)</span>
-          </button>
+            <button
+              onClick={() => setActiveTab('video')}
+              className={`px-3.5 py-2 rounded-xl border flex items-center space-x-2 text-sm font-medium transition ${
+                activeTab === 'video'
+                  ? 'bg-pink-600 border-pink-500 text-white shadow-lg shadow-pink-600/30'
+                  : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
+              }`}
+            >
+              <Film className="h-4 w-4 text-pink-300" />
+              <span>Video (I2V)</span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('gallery')}
-            className={`px-3.5 py-2 rounded-xl border flex items-center space-x-2 text-sm font-medium transition ${
-              activeTab === 'gallery'
-                ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-600/30'
-                : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
-            }`}
-          >
-            <History className="h-4 w-4" />
-            <span>Gallery ({history.length})</span>
-          </button>
+            <button
+              onClick={() => setActiveTab('gallery')}
+              className={`px-3.5 py-2 rounded-xl border flex items-center space-x-2 text-sm font-medium transition ${
+                activeTab === 'gallery'
+                  ? 'bg-purple-600 border-purple-500 text-white shadow-lg shadow-purple-600/30'
+                  : 'bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700'
+              }`}
+            >
+              <History className="h-4 w-4" />
+              <span>Gallery ({history.length})</span>
+            </button>
+          </div>
+
+          <div className="hidden sm:block">
+            <PWAInstallButton />
+          </div>
 
           <button
             onClick={() => setIsSettingsOpen(true)}
-            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center space-x-2 text-sm font-medium transition shadow-sm hover:border-purple-500/50"
+            className="px-3 py-2 sm:px-3.5 sm:py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center space-x-1.5 sm:space-x-2 text-xs sm:text-sm font-medium transition shadow-sm hover:border-purple-500/50"
           >
-            <Key className="h-4 w-4 text-purple-400" />
-            <span>Tokens ({tokenStatuses.length})</span>
+            <Key className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-purple-400" />
+            <span className="hidden xs:inline">Tokens</span>
+            <span>({tokenStatuses.length})</span>
             {tokenStatuses.some(t => t.status === 'valid') && (
               <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
             )}
@@ -724,7 +736,7 @@ export default function App() {
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-start pb-24 md:pb-6">
         {activeTab === 'gallery' ? (
           <div className="lg:col-span-12 space-y-6">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
@@ -1484,12 +1496,12 @@ export default function App() {
 
       {/* Settings Modal (HF Tokens Management) */}
       {isSettingsOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-6 animate-in fade-in zoom-in duration-200">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col p-4 sm:p-6 shadow-2xl animate-in fade-in zoom-in duration-200 overflow-hidden">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3 sm:pb-4 shrink-0">
               <div className="flex items-center space-x-2">
                 <Key className="h-5 w-5 text-purple-400" />
-                <h2 className="text-lg font-bold">Hugging Face Tokens Management</h2>
+                <h2 className="text-base sm:text-lg font-bold">Hugging Face Tokens & Gemini API</h2>
               </div>
               <button
                 onClick={() => setIsSettingsOpen(false)}
@@ -1499,7 +1511,7 @@ export default function App() {
               </button>
             </div>
 
-            <div className="space-y-4">
+            <div className="overflow-y-auto flex-1 py-4 space-y-5 pr-1">
               <div>
                 <label className="text-sm font-medium text-slate-200 block mb-1">
                   Paste Hugging Face Tokens (One per line / Press Enter)
@@ -1508,7 +1520,7 @@ export default function App() {
                   Tokens are automatically rotated (cycled) if a quota or rate limit is reached, ensuring uninterrupted workflows across Qwen & LTX spaces.
                 </p>
                 <textarea
-                  rows={5}
+                  rows={4}
                   value={tokenInputText}
                   onChange={handleTokenTextChange}
                   placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&#10;hf_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
@@ -1531,7 +1543,7 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
+                <div className="max-h-40 sm:max-h-48 overflow-y-auto space-y-2 pr-1">
                   {tokenStatuses.length === 0 ? (
                     <div className="text-center py-6 bg-slate-950 rounded-xl border border-slate-800 text-xs text-slate-500">
                       No tokens added yet. Paste tokens above (optional).
@@ -1575,7 +1587,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="border-t border-slate-800 pt-5">
+              <div className="border-t border-slate-800 pt-4">
                 <label className="text-sm font-medium text-slate-200 block mb-1">
                   Gemini API Keys (One per line / Press Enter)
                 </label>
@@ -1583,7 +1595,7 @@ export default function App() {
                   Used for AI Prompt Enhancement. Keys are automatically rotated (cycled) if rate limits or quota errors occur.
                 </p>
                 <textarea
-                  rows={4}
+                  rows={3}
                   value={geminiKeyInputText}
                   onChange={handleGeminiKeyTextChange}
                   placeholder="AIzaSy...&#10;AIzaSy..."
@@ -1592,10 +1604,10 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex justify-end pt-4 border-t border-slate-800">
+            <div className="flex justify-end pt-3 sm:pt-4 border-t border-slate-800 shrink-0">
               <button
                 onClick={() => setIsSettingsOpen(false)}
-                className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-semibold transition"
+                className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-sm font-semibold transition w-full sm:w-auto"
               >
                 Save & Close
               </button>
@@ -1631,6 +1643,51 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Mobile Bottom Navigation Bar */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 px-3 py-2 flex items-center justify-around shadow-2xl">
+        <button
+          onClick={() => setActiveTab('generate')}
+          className={`flex flex-col items-center space-y-1 py-1 px-3 rounded-xl transition ${
+            activeTab === 'generate' ? 'text-purple-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Sparkles className="h-5 w-5" />
+          <span className="text-[10px]">Generate</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('edit')}
+          className={`flex flex-col items-center space-y-1 py-1 px-3 rounded-xl transition ${
+            activeTab === 'edit' ? 'text-purple-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Layers className="h-5 w-5" />
+          <span className="text-[10px]">Edit</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('video')}
+          className={`flex flex-col items-center space-y-1 py-1 px-3 rounded-xl transition ${
+            activeTab === 'video' ? 'text-pink-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Film className="h-5 w-5" />
+          <span className="text-[10px]">Video</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('gallery')}
+          className={`flex flex-col items-center space-y-1 py-1 px-3 rounded-xl transition relative ${
+            activeTab === 'gallery' ? 'text-purple-400 font-semibold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <History className="h-5 w-5" />
+          <span className="text-[10px]">Gallery</span>
+          {history.length > 0 && (
+            <span className="absolute top-0 right-2 px-1.5 py-0.5 bg-purple-600 text-white text-[9px] font-bold rounded-full">
+              {history.length}
+            </span>
+          )}
+        </button>
+      </nav>
     </div>
   );
 }

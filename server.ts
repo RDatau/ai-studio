@@ -24,8 +24,8 @@ app.post('/api/test-token', async (req, res) => {
 
 app.post('/api/enhance-prompt', async (req, res) => {
   try {
-    const { prompt, keys, image } = req.body;
-    const result = await enhancePrompt(prompt, keys, image);
+    const { prompt, keys, image, mode } = req.body;
+    const result = await enhancePrompt(prompt, keys, image, mode);
     return res.json(result);
   } catch (err: any) {
     console.error('Prompt enhancement error:', err);

@@ -84,13 +84,28 @@ export const createGeminiClient = (apiKey?: string): GoogleGenAI => {
   });
 };
 
-export async function enhancePrompt(prompt: string, keys?: string | string[], imageBase64?: string | null): Promise<{ enhanced: string; usedKeyIndex: number }> {
+export async function enhancePrompt(prompt: string, keys?: string | string[], imageBase64?: string | null, mode: 'generate' | 'edit' | 'video' = 'generate'): Promise<{ enhanced: string; usedKeyIndex: number }> {
   const allKeys = getAllGeminiApiKeys(keys);
   if (allKeys.length === 0) {
     throw new Error('No valid Gemini API keys found.');
   }
 
-  const instructions = `You are an expert AI Video Prompt & Audio Architect.
+  let instructions = '';
+  if (mode === 'generate') {
+    instructions = `You are an expert AI Image Prompt Architect and Master Photographer.
+Task: Enhance the user's image generation prompt for Qwen Image 2.1 Uncensored.
+User's Raw Prompt: "${prompt}"
+Goal: Create a rich, highly detailed, cinematic image generation prompt specifying subject, style, lighting, composition, colors, atmosphere, and exquisite details.
+Return ONLY the enhanced image prompt text, ready to use, without any conversational preamble or quotes.`;
+  } else if (mode === 'edit') {
+    instructions = `You are an expert AI Image Editing Prompt Architect.
+Task: Enhance the user's image editing instruction based on the provided reference image.
+Visual Context: Analyze the provided reference image.
+User's Raw Edit Request: "${prompt}"
+Goal: Create a precise, detailed, and clear image editing instruction that explains what changes, additions, or style transfers to perform on the reference image while keeping the core subject intact.
+Return ONLY the enhanced edit prompt text without any conversational preamble or quotes.`;
+  } else {
+    instructions = `You are an expert AI Video Prompt & Audio Architect.
 Task: Enhance the user's video prompt.
 Visual Context: Analyze the provided image to identify subjects, setting, mood, and lighting.
 User's Raw Prompt: "${prompt}"
@@ -100,6 +115,7 @@ Mandatory Section: Add an 'Audio Intent' section describing:
 2. Speech/Dialog (if any, matching the mood).
 3. Background sounds/SFX fitting the visual scene and mood.
 Return ONLY the enhanced prompt followed by the 'Audio Intent' section.`;
+  }
 
   for (let attempt = 0; attempt < allKeys.length; attempt++) {
     const keyObj = getNextAvailableGeminiKey(allKeys);
