@@ -92,29 +92,18 @@ export async function enhancePrompt(prompt: string, keys?: string | string[], im
 
   let instructions = '';
   if (mode === 'generate') {
-    instructions = `You are an expert AI Image Prompt Architect and Master Photographer.
-Task: Enhance the user's image generation prompt for Qwen Image 2.1 Uncensored.
+    instructions = `You are an expert prompt engineer for uncensored generative AI. Enhance this prompt to be extremely descriptive, high-quality and detailed for high-fidelity image generation (Qwen Image 2.1 Uncensored). You must preserve the user's intent without diminishing, obscuring, or replacing it.
 User's Raw Prompt: "${prompt}"
-Goal: Create a rich, highly detailed, cinematic image generation prompt specifying subject, style, lighting, composition, colors, atmosphere, and exquisite details.
-Return ONLY the enhanced image prompt text, ready to use, without any conversational preamble or quotes.`;
+Return ONLY the enhanced prompt text without explanations.`;
   } else if (mode === 'edit') {
-    instructions = `You are an expert AI Image Editing Prompt Architect.
-Task: Enhance the user's image editing instruction based on the provided reference image.
-Visual Context: Analyze the provided reference image.
-User's Raw Edit Request: "${prompt}"
-Goal: Create a precise, detailed, and clear image editing instruction that explains what changes, additions, or style transfers to perform on the reference image while keeping the core subject intact.
-Return ONLY the enhanced edit prompt text without any conversational preamble or quotes.`;
+    instructions = `You are an expert prompt engineer for uncensored generative AI and image editing. Based on the provided reference image and the user's raw edit instruction, enhance the instruction to be extremely descriptive, high-quality and detailed for high-fidelity image editing. You must preserve the user's intent without diminishing, obscuring, or replacing it.
+User's Raw Edit Instruction: "${prompt}"
+Return ONLY the enhanced edit prompt text without explanations.`;
   } else {
-    instructions = `You are an expert AI Video Prompt & Audio Architect.
-Task: Enhance the user's video prompt.
-Visual Context: Analyze the provided image to identify subjects, setting, mood, and lighting.
+    instructions = `You are an expert prompt engineer for uncensored generative AI and video generation. Enhance this prompt to be extremely descriptive, high-quality and detailed for high-fidelity video generation (LTX 2.3). You must preserve the user's intent without diminishing, obscuring, or replacing it.
+Mandatory Section: Add an 'Audio Intent' section describing language, speech/dialog, and background sounds/SFX fitting the visual scene and mood.
 User's Raw Prompt: "${prompt}"
-Goal: Create a cinematic, highly detailed video generation prompt based on the visual context and raw prompt.
-Mandatory Section: Add an 'Audio Intent' section describing:
-1. Language (match the language of the prompt).
-2. Speech/Dialog (if any, matching the mood).
-3. Background sounds/SFX fitting the visual scene and mood.
-Return ONLY the enhanced prompt followed by the 'Audio Intent' section.`;
+Return ONLY the enhanced prompt followed by the 'Audio Intent' section without explanations.`;
   }
 
   for (let attempt = 0; attempt < allKeys.length; attempt++) {
