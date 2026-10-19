@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+html, body {
+  overscroll-behavior-y: none;
+  background-color: #020617;
+  color: #f8fafc;
+}
+
 /* Universal Minimalist Scrollbar */
 * {
   scrollbar-width: thin;
