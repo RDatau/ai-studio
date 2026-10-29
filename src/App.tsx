@@ -895,7 +895,7 @@ export default function App() {
                           />
                         </div>
                       )}
-                      <div className="absolute top-2 right-2 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition z-50">
+                      <div className="absolute top-2 right-2 flex flex-col gap-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition z-50">
                         <button
                           onClick={() => setInfoModal(item)}
                           className="p-2 bg-slate-950/80 hover:bg-slate-950 text-blue-400 rounded-lg backdrop-blur shadow"
@@ -922,7 +922,7 @@ export default function App() {
                           <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
-                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent opacity-0 group-hover:opacity-100 transition flex items-end p-4 z-40">
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent opacity-100 sm:opacity-0 group-hover:opacity-100 transition flex items-end p-4 z-40">
                         <div className="flex space-x-2 w-full">
                           <button
                             onClick={() => downloadMedia(item.type === 'video' ? item.videoUrl! : item.imageUrl!, item.type === 'video' ? 'video' : 'image', index)}
