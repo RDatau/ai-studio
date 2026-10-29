@@ -26,6 +26,7 @@ import {
   Video
 } from 'lucide-react';
 import { PWAInstallButton } from './components/PWAInstallButton';
+import { ImageViewerModal } from './components/ImageViewerModal';
 import { generateQwenImageClientSide as generateQwenImageT2I } from './services/qwenGenerateClientService';
 import { generateQwenImageClientSide as generateQwenImageI2I } from './services/qwenClientService';
 import { generateLtxVideoClientSide } from './services/ltxClientService';
@@ -91,27 +92,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'generate' | 'edit' | 'video' | 'gallery'>('generate');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [fullScreenMedia, setFullScreenMedia] = useState<{ url: string; type: 'image' | 'video' } | null>(null);
-  const [zoomLevel, setZoomLevel] = useState(1);
-  const zoomContainerRef = useRef<HTMLDivElement>(null);
-  
-  const handleZoom = (delta: number) => setZoomLevel(prev => Math.min(Math.max(prev + delta, 0.5), 3));
-  const handleResetZoom = () => setZoomLevel(1);
-
-  // Gesture handling for pinch/scroll zoom
-  useEffect(() => {
-    if (!fullScreenMedia || fullScreenMedia.type !== 'image' || !zoomContainerRef.current) return;
-    
-    const container = zoomContainerRef.current;
-    const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
-        handleZoom(e.deltaY > 0 ? -0.1 : 0.1);
-      }
-    };
-    
-    container.addEventListener('wheel', handleWheel, { passive: false });
-    return () => container.removeEventListener('wheel', handleWheel);
-  }, [fullScreenMedia]);
   const [editSpace, setEditSpace] = useState('FelyaHuhing/qwen-image-21-uncensored');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isSelectMode, setIsSelectMode] = useState(false);
@@ -521,22 +501,22 @@ export default function App() {
         localStorage.setItem('video_token_last_working_index', result.usedIndex.toString());
       }
 
+      let videoDataUrl = result.videoUrl;
+      if (!videoDataUrl.startsWith('data:')) {
+        setLoadingMessage('Menyimpan video ke penyimpanan permanen...');
+        try {
+          videoDataUrl = await fetchUrlToDataUrl(result.videoUrl);
+        } catch (e) {
+          console.warn("Failed to convert video to base64, storing URL instead:", e);
+        }
+      }
+
       const resultObj = {
-        videoUrl: result.videoUrl,
+        videoUrl: videoDataUrl,
         seed: vidSeed || -1,
         usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
       };
       setCurrentVideoResult(resultObj);
-
-
-      setLoadingMessage('Menyimpan video ke penyimpanan permanen...');
-      let videoDataUrl = result.videoUrl;
-      try {
-        videoDataUrl = await fetchUrlToDataUrl(result.videoUrl);
-      } catch (e) {
-        console.warn("Failed to convert video to base64, storing URL instead:", e);
-      }
-      setLoadingMessage('');
 
       const historyItem: GenerationHistoryItem = {
         id: Math.random().toString(36).substring(2, 9),
@@ -1772,55 +1752,12 @@ export default function App() {
         </div>
       )}
 
-      {/* Full Screen Media Modal */}
-      {fullScreenMedia && (
-        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="relative max-w-5xl max-h-[90vh] w-full h-full flex items-center justify-center">
-            <div className="relative w-full h-full flex items-center justify-center overflow-hidden touch-none" id="zoom-container" ref={zoomContainerRef}>
-              <div 
-                className="transition-transform duration-100 ease-out origin-center"
-                style={{ 
-                  transform: `scale(${zoomLevel})`,
-                  cursor: 'grab' 
-                }}
-              >
-                {fullScreenMedia.type === 'video' ? (
-                  <video src={fullScreenMedia.url} controls autoPlay loop className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" />
-                ) : (
-                  <img src={fullScreenMedia.url} alt="Fullscreen preview" className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" />
-                )}
-              </div>
-            </div>
-            
-            {/* Zoom Controls Overlay */}
-            {fullScreenMedia.type === 'image' && (
-              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-slate-900/80 backdrop-blur rounded-full px-4 py-2 border border-slate-700 shadow-xl z-10">
-                <button onClick={() => handleZoom(-0.1)} className="p-2 hover:bg-slate-700 rounded-full transition"><span className="text-xl font-bold text-white">-</span></button>
-                <span className="text-sm font-mono text-slate-300 w-12 text-center">{Math.round(zoomLevel * 100)}%</span>
-                <button onClick={() => handleZoom(0.1)} className="p-2 hover:bg-slate-700 rounded-full transition"><span className="text-xl font-bold text-white">+</span></button>
-                <div className="w-px h-6 bg-slate-700 mx-1" />
-                <button onClick={handleResetZoom} className="text-xs font-bold text-slate-300 hover:text-white px-2">Reset</button>
-              </div>
-            )}
-
-            <div className="absolute top-4 right-4 flex space-x-3 z-10">
-              <button
-                onClick={() => downloadMedia(fullScreenMedia.url, fullScreenMedia.type)}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-xl flex items-center space-x-2 shadow-lg transition active:scale-95"
-              >
-                <Download className="h-4 w-4" />
-                <span>Download</span>
-              </button>
-              <button
-                onClick={() => setFullScreenMedia(null)}
-                className="p-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl transition"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Full Screen Media Modal with Pan & Zoom (Mouse Wheel, Pinch, Drag) */}
+      <ImageViewerModal
+        media={fullScreenMedia}
+        onClose={() => setFullScreenMedia(null)}
+        onDownload={downloadMedia}
+      />
 
       {/* Mobile Bottom Navigation Bar */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-slate-900/95 backdrop-blur-lg border-t border-slate-800 px-3 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] flex items-center justify-around shadow-2xl transform translate-z-0">

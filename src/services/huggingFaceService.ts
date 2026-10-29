@@ -148,6 +148,7 @@ const rotateToken = (tokens: string[], onStatus?: (status: string) => void): str
 };
 
 export const fetchUrlToDataUrl = async (url: string, token?: string): Promise<string> => {
+  if (!url) return '';
   if (url.startsWith('data:')) return url;
   const targetUrl = url.replace(/^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?/i, '');
   const headers: Record<string, string> = {};
@@ -165,13 +166,26 @@ export const fetchUrlToDataUrl = async (url: string, token?: string): Promise<st
   }
 
   if (!resp.ok) {
-    throw new Error(`Failed to fetch image from ${targetUrl}`);
+    throw new Error(`Failed to fetch media from ${targetUrl}`);
   }
-  const blob = await resp.blob();
+
+  let blob = await resp.blob();
+
+  // If fetching an MP4 video or media where MIME type is missing/generic
+  const isVideo = targetUrl.toLowerCase().includes('.mp4') || targetUrl.toLowerCase().includes('video') || (resp.headers.get('content-type') || '').includes('video');
+  if (isVideo && (!blob.type || blob.type === 'application/octet-stream' || blob.type === 'binary/octet-stream')) {
+    blob = new Blob([blob], { type: 'video/mp4' });
+  }
 
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
+    reader.onloadend = () => {
+      let res = reader.result as string;
+      if (isVideo && res && res.startsWith('data:application/octet-stream;')) {
+        res = res.replace('data:application/octet-stream;', 'data:video/mp4;');
+      }
+      resolve(res);
+    };
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });

@@ -1,4 +1,5 @@
 import { Client } from '@gradio/client';
+import { fetchUrlToDataUrl } from './huggingFaceService';
 
 export interface LtxClientParams {
   startImage: string;
@@ -117,6 +118,16 @@ export async function generateLtxVideoClientSide(params: LtxClientParams): Promi
       if (videoUrl.startsWith('/file=') || videoUrl.startsWith('/gradio_api/file=')) {
         const spaceHost = spaceUrl.includes('hf.space') ? spaceUrl : 'https://rdata92-ltx-2-3-10eros.hf.space';
         videoUrl = `${spaceHost}${videoUrl}`;
+      }
+
+      onStatusUpdate?.("Mengunduh & mengonversi video ke Base64 MP4 permanen...");
+      try {
+        const base64Video = await fetchUrlToDataUrl(videoUrl, token);
+        if (base64Video && base64Video.startsWith('data:')) {
+          videoUrl = base64Video;
+        }
+      } catch (convErr) {
+        console.warn("Gagal mengonversi video ke Base64 MP4:", convErr);
       }
 
       onStatusUpdate?.("Video berhasil dirender!");
