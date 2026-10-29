@@ -175,6 +175,11 @@ export default function App() {
   const [vidMode, setVidMode] = useState('anchor only');
   const [vidSeed, setVidSeed] = useState(-1);
   const [vidRandomize, setVidRandomize] = useState(true);
+  const [vidLastFrame, setVidLastFrame] = useState<string | null>(null);
+  const [vidKfStrength, setVidKfStrength] = useState<number>(0.82);
+  const [vidMidKfEnabled, setVidMidKfEnabled] = useState<boolean>(false);
+  const [vidMidKf1Image, setVidMidKf1Image] = useState<string | null>(null);
+  const [vidMidKf1Pos, setVidMidKf1Pos] = useState<number>(50);
   const [currentVideoResult, setCurrentVideoResult] = useState<{ videoUrl: string; seed: number; usedTokenMasked: string } | null>(null);
 
   // Output & Loading state
@@ -482,6 +487,11 @@ export default function App() {
         spaceUrl: 'https://huggingface.co/spaces/rdata92/LTX-2.3-10Eros',
         tokens,
         lastWorkingIndex,
+        kfLastImage: vidLastFrame,
+        kfStrength: vidKfStrength,
+        kfMidEnabled: vidMidKfEnabled,
+        kfMid1Image: vidMidKf1Image,
+        kfMid1Pos: vidMidKf1Pos,
         onStatusUpdate: (status) => setLoadingMessage(status)
       });
 
@@ -1338,6 +1348,117 @@ export default function App() {
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-pink-500"
                       />
                     </div>
+                  </div>
+
+                  {/* LTX 2.3 Keyframes & Motion Guidance Section */}
+                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-slate-200">Keyframes & Motion Guidance</span>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Last Frame (optional)</label>
+                      {vidLastFrame ? (
+                        <div className="relative aspect-video rounded-xl overflow-hidden bg-slate-950 border border-slate-800 group">
+                          <img src={vidLastFrame} alt="Last frame" className="w-full h-full object-cover" />
+                          <button
+                            onClick={() => setVidLastFrame(null)}
+                            className="absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-lg opacity-80 hover:opacity-100 transition"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <label 
+                          onDragOver={handleDragOver}
+                          onDrop={(e) => handleDrop(e, setVidLastFrame)}
+                          className="border-2 border-dashed border-slate-700 hover:border-pink-500 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer bg-slate-950/50 transition"
+                        >
+                          <Film className="h-6 w-6 text-pink-400 mb-1" />
+                          <span className="text-xs text-slate-300 font-medium">Drop Last Frame Image Here - or - Click to Upload</span>
+                          <input type="file" accept="image/*" onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) {
+                              const r = new FileReader();
+                              r.onload = (ev) => setVidLastFrame(ev.target?.result as string);
+                              r.readAsDataURL(f);
+                            }
+                          }} className="hidden" />
+                        </label>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-semibold text-slate-300">Keyframe Strength ({vidKfStrength})</label>
+                        <span className="text-[10px] text-slate-500">applies to last frame + all middle frames</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0.0}
+                        max={1.0}
+                        step={0.01}
+                        value={vidKfStrength}
+                        onChange={(e) => setVidKfStrength(Number(e.target.value))}
+                        className="w-full accent-pink-500 cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="flex items-center space-x-2 pt-2">
+                      <input
+                        type="checkbox"
+                        id="mid-kf-toggle"
+                        checked={vidMidKfEnabled}
+                        onChange={(e) => setVidMidKfEnabled(e.target.checked)}
+                        className="rounded border-slate-700 text-pink-600 focus:ring-pink-500 bg-slate-950"
+                      />
+                      <label htmlFor="mid-kf-toggle" className="text-xs font-semibold text-slate-200 cursor-pointer">
+                        Add Intermediate Keyframes
+                      </label>
+                    </div>
+
+                    {vidMidKfEnabled && (
+                      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
+                        <span className="text-xs font-bold text-pink-400 block">Keyframe 1</span>
+                        {vidMidKf1Image ? (
+                          <div className="relative aspect-video rounded-xl overflow-hidden bg-slate-950 border border-slate-800 group">
+                            <img src={vidMidKf1Image} alt="Keyframe 1" className="w-full h-full object-cover" />
+                            <button
+                              onClick={() => setVidMidKf1Image(null)}
+                              className="absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-lg opacity-80 hover:opacity-100 transition"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <label 
+                            className="border-2 border-dashed border-slate-700 hover:border-pink-500 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer bg-slate-950/50 transition"
+                          >
+                            <span className="text-xs text-slate-300 font-medium">Drop Image Here - or - Click to Upload</span>
+                            <input type="file" accept="image/*" onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) {
+                                const r = new FileReader();
+                                r.onload = (ev) => setVidMidKf1Image(ev.target?.result as string);
+                                r.readAsDataURL(f);
+                              }
+                            }} className="hidden" />
+                          </label>
+                        )}
+                        <div>
+                          <label className="text-xs font-semibold text-slate-300 mb-1 block">Position (% of video) - {vidMidKf1Pos}%</label>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={vidMidKf1Pos}
+                            onChange={(e) => setVidMidKf1Pos(Number(e.target.value))}
+                            className="w-full accent-pink-500 cursor-pointer"
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <button
