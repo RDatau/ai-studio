@@ -1527,7 +1527,7 @@ export default function App() {
                       </div>
                       <button
                         onClick={() => downloadMedia(currentVideoResult.videoUrl, 'video')}
-                        className="px-4 py-2 bg-pink-600 hover:bg-pink-500 text-white font-semibold rounded-lg transition flex items-center space-x-1.5 shadow"
+                        className="px-4 py-2 bg-pink-600 hover:bg-pink-500 text-white font-semibold rounded-lg transition flex items-center space-x-1.5 shadow active:scale-95"
                       >
                         <Download className="h-4 w-4" />
                         <span>Download MP4</span>
@@ -1572,7 +1572,7 @@ export default function App() {
                         </button>
                         <button
                           onClick={() => downloadMedia(currentResult.imageUrl, 'image')}
-                          className="px-5 py-3 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-xl shadow-lg transition transform hover:scale-105 flex items-center space-x-2"
+                          className="px-5 py-3 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-xl shadow-lg transition transform hover:scale-105 flex items-center space-x-2 active:scale-95"
                         >
                           <Download className="h-5 w-5" />
                           <span>Download Instant</span>
@@ -1587,7 +1587,7 @@ export default function App() {
                       </div>
                       <button
                         onClick={() => downloadMedia(currentResult.imageUrl, 'image')}
-                        className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-lg transition flex items-center space-x-1.5"
+                        className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-lg transition flex items-center space-x-1.5 active:scale-95"
                       >
                         <Download className="h-4 w-4" />
                         <span>Download</span>
@@ -1749,7 +1749,7 @@ export default function App() {
             <div className="absolute top-4 right-4 flex space-x-3">
               <button
                 onClick={() => downloadMedia(fullScreenMedia.url, fullScreenMedia.type)}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-xl flex items-center space-x-2 shadow-lg transition"
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-xl flex items-center space-x-2 shadow-lg transition active:scale-95"
               >
                 <Download className="h-4 w-4" />
                 <span>Download</span>
