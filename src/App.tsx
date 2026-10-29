@@ -91,6 +91,27 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'generate' | 'edit' | 'video' | 'gallery'>('generate');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [fullScreenMedia, setFullScreenMedia] = useState<{ url: string; type: 'image' | 'video' } | null>(null);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const zoomContainerRef = useRef<HTMLDivElement>(null);
+  
+  const handleZoom = (delta: number) => setZoomLevel(prev => Math.min(Math.max(prev + delta, 0.5), 3));
+  const handleResetZoom = () => setZoomLevel(1);
+
+  // Gesture handling for pinch/scroll zoom
+  useEffect(() => {
+    if (!fullScreenMedia || fullScreenMedia.type !== 'image' || !zoomContainerRef.current) return;
+    
+    const container = zoomContainerRef.current;
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        handleZoom(e.deltaY > 0 ? -0.1 : 0.1);
+      }
+    };
+    
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [fullScreenMedia]);
   const [editSpace, setEditSpace] = useState('FelyaHuhing/qwen-image-21-uncensored');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isSelectMode, setIsSelectMode] = useState(false);
@@ -1524,7 +1545,7 @@ export default function App() {
                         playsInline
                         className="w-full h-full object-contain"
                       />
-                      <div className="absolute top-4 right-4 flex space-x-2">
+                      <div className="absolute top-4 right-4 flex space-x-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition">
                         <button
                           onClick={() => setFullScreenMedia({ url: currentVideoResult.videoUrl, type: 'video' })}
                           className="p-2.5 bg-slate-900/80 hover:bg-slate-900 text-white rounded-xl backdrop-blur transition shadow-lg"
@@ -1556,7 +1577,7 @@ export default function App() {
                         alt="Generated result"
                         className="w-full h-full object-contain"
                       />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center space-x-4">
+                      <div className="absolute inset-0 bg-black/40 opacity-100 sm:opacity-0 group-hover:opacity-100 transition flex items-center justify-center space-x-2 sm:space-x-4">
                         <button
                           onClick={() => {
                             setMainImage(currentResult.imageUrl);
@@ -1755,12 +1776,34 @@ export default function App() {
       {fullScreenMedia && (
         <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center p-4">
           <div className="relative max-w-5xl max-h-[90vh] w-full h-full flex items-center justify-center">
-            {fullScreenMedia.type === 'video' ? (
-              <video src={fullScreenMedia.url} controls autoPlay loop className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" />
-            ) : (
-              <img src={fullScreenMedia.url} alt="Fullscreen preview" className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" />
+            <div className="relative w-full h-full flex items-center justify-center overflow-hidden touch-none" id="zoom-container" ref={zoomContainerRef}>
+              <div 
+                className="transition-transform duration-100 ease-out origin-center"
+                style={{ 
+                  transform: `scale(${zoomLevel})`,
+                  cursor: 'grab' 
+                }}
+              >
+                {fullScreenMedia.type === 'video' ? (
+                  <video src={fullScreenMedia.url} controls autoPlay loop className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" />
+                ) : (
+                  <img src={fullScreenMedia.url} alt="Fullscreen preview" className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" />
+                )}
+              </div>
+            </div>
+            
+            {/* Zoom Controls Overlay */}
+            {fullScreenMedia.type === 'image' && (
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-slate-900/80 backdrop-blur rounded-full px-4 py-2 border border-slate-700 shadow-xl z-10">
+                <button onClick={() => handleZoom(-0.1)} className="p-2 hover:bg-slate-700 rounded-full transition"><span className="text-xl font-bold text-white">-</span></button>
+                <span className="text-sm font-mono text-slate-300 w-12 text-center">{Math.round(zoomLevel * 100)}%</span>
+                <button onClick={() => handleZoom(0.1)} className="p-2 hover:bg-slate-700 rounded-full transition"><span className="text-xl font-bold text-white">+</span></button>
+                <div className="w-px h-6 bg-slate-700 mx-1" />
+                <button onClick={handleResetZoom} className="text-xs font-bold text-slate-300 hover:text-white px-2">Reset</button>
+              </div>
             )}
-            <div className="absolute top-4 right-4 flex space-x-3">
+
+            <div className="absolute top-4 right-4 flex space-x-3 z-10">
               <button
                 onClick={() => downloadMedia(fullScreenMedia.url, fullScreenMedia.type)}
                 className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-xl flex items-center space-x-2 shadow-lg transition active:scale-95"
