@@ -7,6 +7,11 @@ export interface LtxClientParams {
   spaceUrl?: string;
   tokens: string[];
   lastWorkingIndex?: number;
+  kfLastImage?: string | null;
+  kfStrength?: number;
+  kfMidEnabled?: boolean;
+  kfMid1Image?: string | null;
+  kfMid1Pos?: number;
   onStatusUpdate?: (status: string) => void;
 }
 
@@ -18,6 +23,11 @@ export async function generateLtxVideoClientSide(params: LtxClientParams): Promi
     spaceUrl = 'https://huggingface.co/spaces/rdata92/LTX-2.3-10Eros',
     tokens = [''],
     lastWorkingIndex = 0,
+    kfLastImage,
+    kfStrength = 0.82,
+    kfMidEnabled = false,
+    kfMid1Image,
+    kfMid1Pos = 50,
     onStatusUpdate
   } = params;
 
@@ -30,6 +40,16 @@ export async function generateLtxVideoClientSide(params: LtxClientParams): Promi
 
   onStatusUpdate?.("Mempersiapkan gambar awal (Start Frame)...");
   const imageBlob = await fetch(startImage).then(r => r.blob());
+
+  let kfLastBlob: Blob | null = null;
+  if (kfLastImage) {
+    kfLastBlob = await fetch(kfLastImage).then(r => r.blob());
+  }
+
+  let kfMid1Blob: Blob | null = null;
+  if (kfMidEnabled && kfMid1Image) {
+    kfMid1Blob = await fetch(kfMid1Image).then(r => r.blob());
+  }
 
   let lastError: any = null;
 
@@ -48,7 +68,7 @@ export async function generateLtxVideoClientSide(params: LtxClientParams): Promi
       }
 
       const client = await Client.connect(spaceUrl.replace('https://huggingface.co/spaces/', ''), clientOptions);
-      onStatusUpdate?.("Terhubung ke Space! Mengirim parameter video...");
+      onStatusUpdate?.("Terhubung ke Space! Mengirim parameter video & keyframes...");
 
       const enhancedPrompt = prompt.trim().toLowerCase().includes('audio intent')
         ? prompt
@@ -70,6 +90,11 @@ export async function generateLtxVideoClientSide(params: LtxClientParams): Promi
         first_frame_strength: 0.82,
         seed: -1,
         randomize_seed: true,
+        kf_last_image: kfLastBlob,
+        kf_strength: Number(kfStrength) || 0.82,
+        kf_mid_enabled: Boolean(kfMidEnabled),
+        kf_mid_1_image: kfMid1Blob,
+        kf_mid_1_pos: Number(kfMid1Pos) || 50,
         prompt_segments: "",
         scene_chain_prompt: "",
         scene_chain_enabled: false,
