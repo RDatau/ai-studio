@@ -29,6 +29,7 @@ import { PWAInstallButton } from './components/PWAInstallButton';
 import { generateQwenImageClientSide as generateQwenImageT2I } from './services/qwenGenerateClientService';
 import { generateQwenImageClientSide as generateQwenImageI2I } from './services/qwenClientService';
 import { generateLtxVideoClientSide } from './services/ltxClientService';
+import { fetchUrlToDataUrl } from './services/huggingFaceService';
 
 interface GenerationHistoryItem {
   id: string;
@@ -506,15 +507,28 @@ export default function App() {
       };
       setCurrentVideoResult(resultObj);
 
+
+      setLoadingMessage('Menyimpan video ke penyimpanan permanen...');
+      let videoDataUrl = result.videoUrl;
+      try {
+        videoDataUrl = await fetchUrlToDataUrl(result.videoUrl);
+      } catch (e) {
+        console.warn("Failed to convert video to base64, storing URL instead:", e);
+      }
+      setLoadingMessage('');
+
       const historyItem: GenerationHistoryItem = {
         id: Math.random().toString(36).substring(2, 9),
         type: 'video',
-        videoUrl: result.videoUrl,
+        videoUrl: videoDataUrl,
         prompt: vidPrompt,
         seed: vidSeed || -1,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        timestamp: new Date().toISOString(),
         usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
       };
+      
+      const { addHistoryItem } = await import('./utils/db');
+      await addHistoryItem(historyItem);
       setHistory(prev => [historyItem, ...prev]);
     } catch (err: any) {
       alert(`Error: ${err.message || 'Failed to generate video'}`);
