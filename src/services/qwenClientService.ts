@@ -103,7 +103,7 @@ export async function generateQwenImageClientSide(params: QwenClientParams): Pro
           highlight_protection_strength: 0.35,
         };
       } else {
-        // Fallback/Default for FelyaHuhing/qwen-image-21-uncensored
+        // Fallback/Default for rdata92/qwen-image-21-uncensored
         endpoint = '/edit';
         payload = {
           prompt: prompt,

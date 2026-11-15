@@ -25,8 +25,8 @@ export interface GradioInputComponent {
   defaultValue: any;
 }
 
-export const DEFAULT_QWEN_SPACE_URL = 'https://huggingface.co/spaces/FelyaHuhing/qwen-image-21-uncensored';
-export const DEFAULT_QWEN_SPACE_HOST = 'https://felyahuhing-qwen-image-21-uncensored.hf.space';
+export const DEFAULT_QWEN_SPACE_URL = 'https://huggingface.co/spaces/rdata92/qwen-image-21-uncensored';
+export const DEFAULT_QWEN_SPACE_HOST = 'https://rdata92-qwen-image-21-uncensored.hf.space';
 
 let currentTokenIndex = 0;
 const exhaustedTokensMap = new Map<string, number>();

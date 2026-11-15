@@ -92,7 +92,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'generate' | 'edit' | 'video' | 'gallery'>('generate');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [fullScreenMedia, setFullScreenMedia] = useState<{ url: string; type: 'image' | 'video' } | null>(null);
-  const [editSpace, setEditSpace] = useState('FelyaHuhing/qwen-image-21-uncensored');
+  const [editSpace, setEditSpace] = useState('rdata92/qwen-image-21-uncensored');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [infoModal, setInfoModal] = useState<GenerationHistoryItem | null>(null);
@@ -1129,7 +1129,7 @@ export default function App() {
                       onChange={(e) => setEditSpace(e.target.value)}
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-purple-500"
                     >
-                      <option value="FelyaHuhing/qwen-image-21-uncensored">Qwen-Image-2.1 Uncensored (Standard)</option>
+                      <option value="rdata92/qwen-image-21-uncensored">Qwen-Image-2.1 Uncensored (Standard)</option>
                       <option value="bennie2390/Qwen-Image-Edit-Rapid-AIO-Loras-Experimental">Qwen-Image-Edit Rapid AIO & LoRAs (Experimental)</option>
                     </select>
                   </div>

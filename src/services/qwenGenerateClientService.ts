@@ -51,7 +51,7 @@ export async function generateQwenImageClientSide(params: QwenGenerateParams): P
         clientOptions.hf_token = token.trim();
       }
 
-      const client = await Client.connect('FelyaHuhing/qwen-image-21-uncensored', clientOptions);
+      const client = await Client.connect('rdata92/qwen-image-21-uncensored', clientOptions);
       onStatusUpdate?.("Terhubung! Mengirim tugas generate gambar...");
 
       const response = await client.predict('/generate', {
@@ -74,7 +74,7 @@ export async function generateQwenImageClientSide(params: QwenGenerateParams): P
       }
 
       if (imageUrl.startsWith('/file=') || imageUrl.startsWith('/gradio_api/file=')) {
-        imageUrl = `https://felyahuhing-qwen-image-21-uncensored.hf.space${imageUrl}`;
+        imageUrl = `https://rdata92-qwen-image-21-uncensored.hf.space${imageUrl}`;
       }
 
       onStatusUpdate?.("Gambar berhasil dirender!");

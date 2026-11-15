@@ -1,6 +1,6 @@
 import { Client } from '@gradio/client';
 
-const SPACE_URL = 'FelyaHuhing/qwen-image-21-uncensored';
+const SPACE_URL = 'rdata92/qwen-image-21-uncensored';
 
 export async function testToken(token: string): Promise<{ success: boolean; apiInfo?: any; error?: string }> {
   if (!token || !token.trim()) {
@@ -22,6 +22,9 @@ export async function testToken(token: string): Promise<{ success: boolean; apiI
 }
 
 export const proxyFetch = async (targetUrl: string, init?: RequestInit): Promise<Response> => {
+  if (typeof window === 'undefined') {
+    return await fetch(targetUrl, init);
+  }
   if (targetUrl.startsWith('data:')) {
     return await fetch(targetUrl, init);
   }
