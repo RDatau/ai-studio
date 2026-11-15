@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Download, X, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
+import { useBlobMediaUrl } from '../utils/mediaBlobUrl';
 
 interface ImageViewerModalProps {
   media: { url: string; type: 'image' | 'video' } | null;
@@ -12,14 +13,17 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   onClose,
   onDownload,
 }) => {
-  if (!media) return null;
-
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const touchPinchDistRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const resolvedVideoUrl = useBlobMediaUrl(
+    media?.type === 'video' ? media.url : null,
+    Boolean(media && media.type === 'video')
+  );
 
   // Reset zoom & pan when media changes or opens
   useEffect(() => {
@@ -43,7 +47,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   // Wheel event for direct scroll zooming
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || media.type !== 'image') return;
+    if (!container || !media || media.type !== 'image') return;
 
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -61,13 +65,13 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
 
   // Mouse pan handling
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (media.type !== 'image') return;
+    if (media?.type !== 'image') return;
     setIsDragging(true);
     dragStartRef.current = { x: e.clientX - position.x, y: e.clientY - position.y };
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || media.type !== 'image') return;
+    if (!isDragging || media?.type !== 'image') return;
     setPosition({
       x: e.clientX - dragStartRef.current.x,
       y: e.clientY - dragStartRef.current.y,
@@ -80,7 +84,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
 
   // Touch pan & pinch-zoom handling for Mobile / Android WebApp
   const handleTouchStart = (e: React.TouchEvent) => {
-    if (media.type !== 'image') return;
+    if (media?.type !== 'image') return;
     if (e.touches.length === 1) {
       setIsDragging(true);
       dragStartRef.current = {
@@ -98,7 +102,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (media.type !== 'image') return;
+    if (media?.type !== 'image') return;
     if (e.touches.length === 1 && isDragging) {
       setPosition({
         x: e.touches[0].clientX - dragStartRef.current.x,
@@ -124,6 +128,8 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
     touchPinchDistRef.current = null;
   };
 
+  if (!media) return null;
+
   return (
     <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 select-none">
       <div
@@ -146,7 +152,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
         >
           {media.type === 'video' ? (
             <video
-              src={media.url}
+              src={resolvedVideoUrl || media.url}
               controls
               autoPlay
               loop

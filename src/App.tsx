@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Sparkles,
   Image as ImageIcon,
@@ -27,16 +27,19 @@ import {
 } from 'lucide-react';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { ImageViewerModal } from './components/ImageViewerModal';
+import { GalleryVideoPreview } from './components/GalleryVideoPreview';
 import { generateQwenImageClientSide as generateQwenImageT2I } from './services/qwenGenerateClientService';
 import { generateQwenImageClientSide as generateQwenImageI2I } from './services/qwenClientService';
 import { generateLtxVideoClientSide } from './services/ltxClientService';
 import { fetchUrlToDataUrl } from './services/huggingFaceService';
+import { useBlobMediaUrl, createVideoThumbnail, compressImageToThumbnail } from './utils/mediaBlobUrl';
 
 interface GenerationHistoryItem {
   id: string;
   type: 'generate' | 'edit' | 'video';
   imageUrl?: string;
   videoUrl?: string;
+  thumbnailUrl?: string;
   prompt: string;
   seed: number;
   steps?: number;
@@ -192,6 +195,22 @@ export default function App() {
   // History state
   const [history, setHistory] = useState<GenerationHistoryItem[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const resolvedCurrentVideoUrl = useBlobMediaUrl(
+    currentVideoResult?.videoUrl,
+    activeTab === 'video' && Boolean(currentVideoResult)
+  );
+
+  const handleVideoThumbnailGenerated = useCallback(async (id: string, thumbnailUrl: string) => {
+    setHistory(prev => {
+      const target = prev.find(item => item.id === id);
+      if (target && !target.thumbnailUrl) {
+        const updatedItem = { ...target, thumbnailUrl };
+        import('./utils/db').then(({ addHistoryItem }) => addHistoryItem(updatedItem)).catch(() => {});
+      }
+      return prev.map(item => (item.id === id && !item.thumbnailUrl ? { ...item, thumbnailUrl } : item));
+    });
+  }, []);
 
   // Load tokens and history from IndexedDB on mount
   useEffect(() => {
@@ -511,6 +530,11 @@ export default function App() {
         }
       }
 
+      const thumbnailUrl =
+        (await createVideoThumbnail(videoDataUrl)) ||
+        (await compressImageToThumbnail(vidImage)) ||
+        undefined;
+
       const resultObj = {
         videoUrl: videoDataUrl,
         seed: vidSeed || -1,
@@ -522,6 +546,7 @@ export default function App() {
         id: Math.random().toString(36).substring(2, 9),
         type: 'video',
         videoUrl: videoDataUrl,
+        thumbnailUrl,
         prompt: vidPrompt,
         seed: vidSeed || -1,
         timestamp: new Date().toISOString(),
@@ -875,7 +900,13 @@ export default function App() {
                   <div key={item.id} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden group hover:border-purple-500/50 transition shadow-xl flex flex-col">
                     <div className="relative aspect-square overflow-hidden bg-slate-950">
                       {item.type === 'video' ? (
-                        <video src={item.videoUrl} className="w-full h-full object-cover" muted loop autoPlay playsInline />
+                        <GalleryVideoPreview
+                          id={item.id}
+                          videoUrl={item.videoUrl}
+                          thumbnailUrl={item.thumbnailUrl}
+                          prompt={item.prompt}
+                          onThumbnailGenerated={handleVideoThumbnailGenerated}
+                        />
                       ) : (
                         <img src={item.imageUrl} alt={item.prompt} className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
                       )}
@@ -922,8 +953,8 @@ export default function App() {
                           <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
-                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent opacity-100 sm:opacity-0 group-hover:opacity-100 transition flex items-end p-4 z-40">
-                        <div className="flex space-x-2 w-full">
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent opacity-100 sm:opacity-0 group-hover:opacity-100 transition flex items-end p-4 z-40 pointer-events-none">
+                        <div className="flex space-x-2 w-full pointer-events-auto">
                           <button
                             onClick={() => downloadMedia(item.type === 'video' ? item.videoUrl! : item.imageUrl!, item.type === 'video' ? 'video' : 'image', index)}
                             className="flex-1 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center space-x-1 transition shadow"
@@ -1518,7 +1549,7 @@ export default function App() {
                   <div className="w-full space-y-4">
                     <div className="relative aspect-square sm:aspect-[4/3] rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 group shadow-2xl flex items-center justify-center">
                       <video
-                        src={currentVideoResult.videoUrl}
+                        src={resolvedCurrentVideoUrl || currentVideoResult.videoUrl}
                         controls
                         autoPlay
                         loop
