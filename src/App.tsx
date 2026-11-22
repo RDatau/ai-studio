@@ -226,6 +226,7 @@ export default function App() {
 
   // Load tokens and history from IndexedDB on mount
   useEffect(() => {
+    document.title = 'AI Studio';
     const savedTokens = localStorage.getItem('qwen_hf_tokens');
     if (savedTokens) {
       setTokenInputText(savedTokens);
