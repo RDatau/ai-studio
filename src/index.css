@@ -47,3 +47,7 @@ select option {
   background-color: #0f172a !important; /* Warna gelap agar kontras */
   color: white !important;
 }
+
+.font-logo {
+  font-family: 'Orbitron', sans-serif;
+}

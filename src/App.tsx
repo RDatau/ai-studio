@@ -28,8 +28,18 @@ import {
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { ImageViewerModal } from './components/ImageViewerModal';
 import { GalleryVideoPreview } from './components/GalleryVideoPreview';
+import {
+  RapidAioControls,
+  RAPID_AIO_SPACE_ID,
+  RAPID_AIO_STYLES,
+  DEFAULT_RAPID_AIO_SETTINGS,
+  RapidAioSettingsState,
+} from './components/RapidAioControls';
 import { generateQwenImageClientSide as generateQwenImageT2I } from './services/qwenGenerateClientService';
-import { generateQwenImageClientSide as generateQwenImageI2I } from './services/qwenClientService';
+import {
+  generateQwenImageClientSide as generateQwenImageI2I,
+  addDerivedConditioningClientSide,
+} from './services/qwenClientService';
 import { generateLtxVideoClientSide } from './services/ltxClientService';
 import { fetchUrlToDataUrl } from './services/huggingFaceService';
 import { useBlobMediaUrl, createVideoThumbnail, compressImageToThumbnail } from './utils/mediaBlobUrl';
@@ -168,6 +178,8 @@ export default function App() {
   const [editSeed, setEditSeed] = useState(0);
   const [editRandomizeSeed, setEditRandomizeSeed] = useState(true);
   const [editLoraScale, setEditLoraScale] = useState(1.0);
+  const [rapidAioSettings, setRapidAioSettings] = useState<RapidAioSettingsState>(DEFAULT_RAPID_AIO_SETTINGS);
+  const [isAddingDerived, setIsAddingDerived] = useState(false);
 
   // Video Generator Inputs (LTX 2.3)
   const [vidImage, setVidImage] = useState<string | null>(null);
@@ -425,6 +437,13 @@ export default function App() {
       return;
     }
 
+    const isRapidAio = editSpace === RAPID_AIO_SPACE_ID;
+    const rapidStyleSpec = RAPID_AIO_STYLES.find(s => s.id === rapidAioSettings.loraAdapter);
+    if (isRapidAio && rapidStyleSpec?.requiresTwoImages && !rapidAioSettings.inputImage2) {
+      alert(`Style "${rapidAioSettings.loraAdapter}" requires Image 2 (${rapidStyleSpec.image2Label || 'Reference Image 2'}).`);
+      return;
+    }
+
     setIsLoading(true);
     setLoadingMessage('Preparing reference image & pushing to Hugging Face...');
 
@@ -432,15 +451,36 @@ export default function App() {
       const tokens = getTokensArray();
       const lastWorkingIndex = Number(localStorage.getItem('qwen_edit_last_working_index') || 0);
 
+      const activeSteps = isRapidAio ? rapidAioSettings.steps : editSteps;
+      const activeSeed = isRapidAio ? rapidAioSettings.seed : editSeed;
+      const activeRandomizeSeed = isRapidAio ? rapidAioSettings.randomizeSeed : editRandomizeSeed;
+
       const result = await generateQwenImageI2I({
         baseImage: mainImage,
+        inputImage2: isRapidAio ? rapidAioSettings.inputImage2 : null,
         prompt: editPrompt,
         spaceUrl: editSpace ? `https://huggingface.co/spaces/${editSpace}` : undefined,
         tokens,
-        steps: editSteps,
-        seed: editSeed,
-        randomize_seed: editRandomizeSeed,
+        steps: activeSteps,
+        seed: activeSeed,
+        randomize_seed: activeRandomizeSeed,
         lora_scale: editLoraScale,
+        ...(isRapidAio
+          ? {
+              loraAdapter: rapidAioSettings.loraAdapter,
+              guidanceScale: rapidAioSettings.guidanceScale,
+              targetMegapixels: rapidAioSettings.targetMegapixels,
+              extrasConditionOnly: rapidAioSettings.extrasConditionOnly,
+              padToCanvas: rapidAioSettings.padToCanvas,
+              vaeTiling: rapidAioSettings.vaeTiling,
+              resolutionMultiple: rapidAioSettings.resolutionMultiple,
+              vaeRefMegapixels: rapidAioSettings.vaeRefMegapixels,
+              decoderVae: rapidAioSettings.decoderVae,
+              keepDecoder2x: rapidAioSettings.keepDecoder2x,
+              highlightProtection: rapidAioSettings.highlightProtection,
+              highlightProtectionStrength: rapidAioSettings.highlightProtectionStrength,
+            }
+          : {}),
         lastWorkingIndex,
         additionalImages: extraImages,
         onStatusUpdate: (status) => setLoadingMessage(status)
@@ -451,10 +491,11 @@ export default function App() {
       }
 
       const pngBase64 = await convertToPngBase64(result.imageUrl);
+      const finalSeed = result.seed ?? activeSeed;
 
       const resultObj = {
         imageUrl: pngBase64,
-        seed: editSeed,
+        seed: finalSeed,
         usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
       };
       setCurrentResult(resultObj);
@@ -464,8 +505,8 @@ export default function App() {
         type: 'edit',
         imageUrl: pngBase64,
         prompt: editPrompt,
-        seed: editSeed,
-        steps: editSteps,
+        seed: finalSeed,
+        steps: activeSteps,
         loraScale: editLoraScale,
         timestamp: new Date().toISOString(),
         usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
@@ -480,6 +521,56 @@ export default function App() {
     } finally {
       setIsLoading(false);
       setLoadingMessage('');
+    }
+  };
+
+  const handleRapidImage2Upload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const url = URL.createObjectURL(file);
+      const base64 = await convertToPngBase64(url);
+      setRapidAioSettings(prev => ({ ...prev, inputImage2: base64 }));
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const handleRapidImage2Drop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      const url = URL.createObjectURL(file);
+      const base64 = await convertToPngBase64(url);
+      setRapidAioSettings(prev => ({ ...prev, inputImage2: base64 }));
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const handleAddDerivedRef = async () => {
+    if (!mainImage) {
+      alert('Please upload Image 1 first.');
+      return;
+    }
+    if (rapidAioSettings.derivedType === 'None') {
+      alert('Please select a Derived Type first.');
+      return;
+    }
+    setIsAddingDerived(true);
+    try {
+      const tokens = getTokensArray();
+      const { derivedImageUrl } = await addDerivedConditioningClientSide({
+        baseImage: mainImage,
+        additionalImages: extraImages,
+        derivedType: rapidAioSettings.derivedType,
+        useGpu: rapidAioSettings.derivedUseGpu,
+        tokens,
+      });
+      const derivedBase64 = await convertToPngBase64(derivedImageUrl);
+      setExtraImages(prev => (prev.length < 9 ? [...prev, derivedBase64] : prev));
+      setRapidAioSettings(prev => ({ ...prev, derivedPreview: derivedBase64 }));
+    } catch (err: any) {
+      alert(`Error generating derived ref: ${err.message || 'Failed'}`);
+    } finally {
+      setIsAddingDerived(false);
     }
   };
 
@@ -698,22 +789,19 @@ export default function App() {
       {/* Top Header */}
       <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-40 px-4 sm:px-6 py-3.5 flex items-center justify-between">
         <div className="flex items-center space-x-3">
-          <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl bg-gradient-to-tr from-purple-600 via-indigo-600 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/30 shrink-0">
-            <Sparkles className="h-4 w-4 sm:h-5 sm:w-5 text-white animate-pulse" />
-          </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <h1 className="font-bold text-sm sm:text-lg bg-gradient-to-r from-purple-400 via-pink-300 to-white bg-clip-text text-transparent truncate max-w-[180px] sm:max-w-none">
-                Qwen Image Studio Pro
-              </h1>
-              <span className="hidden sm:inline-block px-2 py-0.5 text-xs font-semibold bg-purple-500/20 text-purple-300 rounded-full border border-purple-500/30">
-                AI Studio
-              </span>
-            </div>
-            <p className="text-[10px] sm:text-xs text-slate-400 truncate max-w-[200px] sm:max-w-none">
-              Linked with <span className="text-purple-400">Qwen-2.1</span> & <span className="text-pink-400">LTX-2.3</span>
-            </p>
-          </div>
+          <img
+            src="/assets/aistudio/file_0000000087948211bbeb8a80d1c68b65_380910fc.png"
+            alt="AI Studio Logo"
+            className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl object-contain shrink-0 drop-shadow-[0_2px_10px_rgba(168,85,247,0.35)]"
+          />
+          <h1 className="font-logo text-lg sm:text-2xl tracking-wider flex items-center gap-1.5 select-none leading-none">
+            <span className="font-black bg-gradient-to-r from-fuchsia-500 via-blue-400 to-cyan-400 bg-clip-text text-transparent drop-shadow-[0_1px_8px_rgba(34,211,238,0.25)]">
+              AI
+            </span>
+            <span className="font-bold bg-gradient-to-b from-white via-slate-100 to-indigo-200 bg-clip-text text-transparent drop-shadow-[0_1px_6px_rgba(148,163,184,0.35)]">
+              Studio
+            </span>
+          </h1>
         </div>
 
         <div className="flex items-center space-x-2 sm:space-x-3">
@@ -1237,33 +1325,44 @@ export default function App() {
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-500 transition resize-none"
                   />
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Steps ({editSteps})</label>
-                      <input
-                        type="range"
-                        min={editSpace === 'bennie2390/Qwen-Image-Edit-Rapid-AIO-Loras-Experimental' ? 1 : 8}
-                        max={50}
-                        value={editSteps}
-                        onChange={(e) => setEditSteps(Number(e.target.value))}
-                        className="w-full accent-purple-500 cursor-pointer mt-2"
-                      />
+                  {editSpace === RAPID_AIO_SPACE_ID ? (
+                    <RapidAioControls
+                      settings={rapidAioSettings}
+                      onChange={setRapidAioSettings}
+                      editPrompt={editPrompt}
+                      onPromptChange={setEditPrompt}
+                      onUploadImage2={handleRapidImage2Upload}
+                      onDropImage2={handleRapidImage2Drop}
+                      onAddDerivedRef={handleAddDerivedRef}
+                      isAddingDerived={isAddingDerived}
+                    />
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 mb-1.5 block">Steps ({editSteps})</label>
+                        <input
+                          type="range"
+                          min={8}
+                          max={50}
+                          value={editSteps}
+                          onChange={(e) => setEditSteps(Number(e.target.value))}
+                          className="w-full accent-purple-500 cursor-pointer mt-2"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-300 mb-1.5 block">LoRA Scale ({editLoraScale})</label>
+                        <input
+                          type="range"
+                          min={0.0}
+                          max={1.5}
+                          step={0.05}
+                          value={editLoraScale}
+                          onChange={(e) => setEditLoraScale(Number(e.target.value))}
+                          className="w-full accent-purple-500 cursor-pointer mt-2"
+                        />
+                      </div>
                     </div>
-                    {editSpace !== 'bennie2390/Qwen-Image-Edit-Rapid-AIO-Loras-Experimental' && (
-                    <div>
-                      <label className="text-xs font-semibold text-slate-300 mb-1.5 block">LoRA Scale ({editLoraScale})</label>
-                      <input
-                        type="range"
-                        min={0.0}
-                        max={1.5}
-                        step={0.05}
-                        value={editLoraScale}
-                        onChange={(e) => setEditLoraScale(Number(e.target.value))}
-                        className="w-full accent-purple-500 cursor-pointer mt-2"
-                      />
-                    </div>
-                    )}
-                  </div>
+                  )}
 
                   <button
                     onClick={handleEdit}

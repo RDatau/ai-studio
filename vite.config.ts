@@ -11,7 +11,7 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico'],
+        includeAssets: ['favicon.png', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png'],
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg}']
         },
@@ -21,8 +21,8 @@ export default defineConfig(() => {
         },
         manifest: {
           id: '/',
-          name: 'Qwen Image Studio Pro',
-          short_name: 'QwenStudio',
+          name: 'AI Studio',
+          short_name: 'AI Studio',
           description: 'Advanced Qwen Image 2.1 Uncensored generator & editor.',
           theme_color: '#0f172a',
           background_color: '#0f172a',
@@ -31,13 +31,13 @@ export default defineConfig(() => {
           scope: '/',
           icons: [
             {
-              src: 'https://cdn-icons-png.flaticon.com/512/3342/3342137.png',
+              src: '/pwa-192x192.png',
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: 'https://cdn-icons-png.flaticon.com/512/3342/3342137.png',
+              src: '/pwa-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
