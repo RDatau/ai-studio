@@ -70,7 +70,7 @@ export const toProxyUrl = (targetUrl: string): string => {
 };
 
 export const proxyFetch = async (targetUrl: string, init?: RequestInit): Promise<Response> => {
-  if (targetUrl.startsWith('data:')) {
+  if (targetUrl.startsWith('data:') || targetUrl.startsWith('blob:')) {
     return await fetch(targetUrl, init);
   }
   const proxyUrl = toProxyUrl(targetUrl);
@@ -80,7 +80,8 @@ export const proxyFetch = async (targetUrl: string, init?: RequestInit): Promise
     if (resp.ok && contentType.includes('text/html') && !targetUrl.includes('.html') && !targetUrl.includes('huggingface.co/spaces')) {
       return await fetch(targetUrl, init);
     }
-    if (resp.status === 404 || resp.status === 405 || resp.status === 502 || resp.status === 504) {
+    // 403 can happen when /api/hf-proxy hits a different replica on a multi-replica HF Space
+    if (resp.status === 403 || resp.status === 404 || resp.status === 405 || resp.status === 502 || resp.status === 504) {
       return await fetch(targetUrl, init);
     }
     return resp;
@@ -152,10 +153,10 @@ export const fetchUrlToBlob = async (url: string, token?: string): Promise<Blob>
     throw new Error('Media URL is empty');
   }
 
-  if (url.startsWith('data:')) {
+  if (url.startsWith('data:') || url.startsWith('blob:')) {
     const resp = await fetch(url);
     const blob = await resp.blob();
-    if (!blob || blob.size === 0) throw new Error('Empty data URL blob');
+    if (!blob || blob.size === 0) throw new Error('Empty local media blob');
     return blob;
   }
 
@@ -166,58 +167,107 @@ export const fetchUrlToBlob = async (url: string, token?: string): Promise<Blob>
         : targetUrl.replace('/file=', '/gradio_api/file='))
     : null;
 
-  const candidates: Array<{ reqUrl: string; useToken: boolean }> = [];
-  if (token) {
-    candidates.push({ reqUrl: targetUrl, useToken: true });
-    if (altUrl) candidates.push({ reqUrl: altUrl, useToken: true });
-  }
-  candidates.push({ reqUrl: targetUrl, useToken: false });
-  if (altUrl) candidates.push({ reqUrl: altUrl, useToken: false });
+  const tryFetchCandidate = async (
+    reqUrl: string,
+    mode: 'direct' | 'proxy',
+    useToken: boolean,
+    credentials: RequestCredentials = 'omit'
+  ): Promise<Blob> => {
+    const headers: Record<string, string> = {};
+    if (useToken && token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
 
-  let lastError: Error | null = null;
+    const fetchTarget = mode === 'proxy' ? toProxyUrl(reqUrl) : reqUrl;
+    const resp = await fetch(fetchTarget, {
+      headers,
+      ...(mode === 'direct' ? { mode: 'cors' as RequestMode, credentials } : {}),
+    });
 
-  for (const candidate of candidates) {
+    if (!resp.ok) {
+      let detail = '';
+      try {
+        const text = await resp.text();
+        if (text && text.length < 300) detail = ` (${text})`;
+      } catch {}
+      throw new Error(`HTTP ${resp.status} while downloading ${reqUrl}${detail}`);
+    }
+
+    const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+    if (contentType.includes('text/html') || contentType.includes('application/json')) {
+      throw new Error(`Unexpected response type "${contentType}" instead of media file`);
+    }
+
+    let blob = await resp.blob();
+    if (!blob || blob.size < 100) {
+      throw new Error(`Downloaded media file is empty or too small (${blob?.size || 0} bytes)`);
+    }
+
+    const isVideo =
+      reqUrl.toLowerCase().includes('.mp4') ||
+      reqUrl.toLowerCase().includes('.webm') ||
+      reqUrl.toLowerCase().includes('video') ||
+      contentType.includes('video');
+
+    if (isVideo && (!blob.type || blob.type === 'application/octet-stream' || blob.type === 'binary/octet-stream')) {
+      blob = new Blob([blob], { type: 'video/mp4' });
+    }
+
+    return blob;
+  };
+
+  const buildAttempts = (reqUrl: string) => {
+    const list: Array<{ reqUrl: string; mode: 'direct' | 'proxy'; useToken: boolean; credentials: RequestCredentials }> = [];
+    const hasSignedJwt = reqUrl.includes('__sign=');
+
+    if (hasSignedJwt) {
+      // Try direct browser fetch first so we hit the same HF replica / cookies as @gradio/client
+      list.push({ reqUrl, mode: 'direct', useToken: false, credentials: 'omit' });
+      list.push({ reqUrl, mode: 'direct', useToken: false, credentials: 'include' });
+      if (token) {
+        list.push({ reqUrl, mode: 'direct', useToken: true, credentials: 'omit' });
+      }
+    } else {
+      if (token) {
+        list.push({ reqUrl, mode: 'direct', useToken: true, credentials: 'omit' });
+      }
+      list.push({ reqUrl, mode: 'direct', useToken: false, credentials: 'omit' });
+      list.push({ reqUrl, mode: 'direct', useToken: false, credentials: 'include' });
+    }
+
+    // Fallback through server proxy if direct CORS fails
+    if (token) {
+      list.push({ reqUrl, mode: 'proxy', useToken: true, credentials: 'omit' });
+    }
+    list.push({ reqUrl, mode: 'proxy', useToken: false, credentials: 'omit' });
+    return list;
+  };
+
+  let primaryError: Error | null = null;
+  for (const attempt of buildAttempts(targetUrl)) {
     try {
-      const headers: Record<string, string> = {};
-      if (candidate.useToken && token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const resp = await proxyFetch(candidate.reqUrl, { headers });
-      if (!resp.ok) {
-        lastError = new Error(`HTTP ${resp.status} while downloading ${candidate.reqUrl}`);
-        continue;
-      }
-
-      const contentType = (resp.headers.get('content-type') || '').toLowerCase();
-      if (contentType.includes('text/html') || contentType.includes('application/json')) {
-        lastError = new Error(`Unexpected response type "${contentType}" instead of media file`);
-        continue;
-      }
-
-      let blob = await resp.blob();
-      if (!blob || blob.size < 100) {
-        lastError = new Error(`Downloaded media file is empty or too small (${blob?.size || 0} bytes)`);
-        continue;
-      }
-
-      const isVideo =
-        targetUrl.toLowerCase().includes('.mp4') ||
-        targetUrl.toLowerCase().includes('.webm') ||
-        targetUrl.toLowerCase().includes('video') ||
-        contentType.includes('video');
-
-      if (isVideo && (!blob.type || blob.type === 'application/octet-stream' || blob.type === 'binary/octet-stream')) {
-        blob = new Blob([blob], { type: 'video/mp4' });
-      }
-
-      return blob;
+      return await tryFetchCandidate(attempt.reqUrl, attempt.mode, attempt.useToken, attempt.credentials);
     } catch (err: any) {
-      lastError = err instanceof Error ? err : new Error(String(err));
+      primaryError = err instanceof Error ? err : new Error(String(err));
     }
   }
 
-  throw lastError || new Error(`Failed to fetch media from ${targetUrl}`);
+  let altError: Error | null = null;
+  if (altUrl) {
+    for (const attempt of buildAttempts(altUrl)) {
+      try {
+        return await tryFetchCandidate(attempt.reqUrl, attempt.mode, attempt.useToken, attempt.credentials);
+      } catch (err: any) {
+        altError = err instanceof Error ? err : new Error(String(err));
+      }
+    }
+  }
+
+  // Prefer non-404 primary error over speculative altUrl 404
+  if (primaryError && (!altError || altError.message.includes('HTTP 404'))) {
+    throw primaryError;
+  }
+  throw altError || primaryError || new Error(`Failed to fetch media from ${targetUrl}`);
 };
 
 export const fetchUrlToDataUrl = async (url: string, token?: string): Promise<string> => {

@@ -125,9 +125,11 @@ export async function generateLtxVideoClientSide(params: LtxClientParams): Promi
         throw new Error("URL video tidak ditemukan dalam respons Space.");
       }
 
+      const spaceHost = spaceUrl.includes('hf.space') ? spaceUrl.replace(/\/+$/, '') : 'https://rdata92-ltx-2-3-10eros.hf.space';
       if (videoUrl.startsWith('/file=') || videoUrl.startsWith('/gradio_api/file=')) {
-        const spaceHost = spaceUrl.includes('hf.space') ? spaceUrl : 'https://rdata92-ltx-2-3-10eros.hf.space';
         videoUrl = `${spaceHost}${videoUrl}`;
+      } else if (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://') && !videoUrl.startsWith('data:')) {
+        videoUrl = `${spaceHost}/gradio_api/file=${videoUrl}`;
       }
 
       onStatusUpdate?.("Mengunduh video MP4 ke penyimpanan biner permanen...");
