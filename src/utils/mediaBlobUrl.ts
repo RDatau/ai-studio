@@ -28,16 +28,27 @@ export function dataUrlToBlob(dataUrl: string): Blob | null {
 }
 
 /**
- * React hook that converts a Base64 Data URL to a temporary Blob URL only while `enabled` is true,
- * and revokes the Blob URL automatically on disable or unmount to keep memory/decoder load minimal.
+ * React hook that turns a binary Blob or Base64 Data URL into a temporary Object URL
+ * only while `enabled` is true, and revokes it automatically on disable or unmount.
  */
-export function useBlobMediaUrl(src: string | null | undefined, enabled: boolean = true): string | undefined {
+export function useBlobMediaUrl(
+  src: string | Blob | null | undefined,
+  enabled: boolean = true
+): string | undefined {
   const [resolvedUrl, setResolvedUrl] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     if (!enabled || !src) {
       setResolvedUrl(undefined);
       return;
+    }
+
+    if (src instanceof Blob) {
+      const objectUrl = URL.createObjectURL(src);
+      setResolvedUrl(objectUrl);
+      return () => {
+        URL.revokeObjectURL(objectUrl);
+      };
     }
 
     if (!src.startsWith('data:')) {
@@ -94,21 +105,28 @@ export async function compressImageToThumbnail(imageUrl: string, maxDim: number 
 }
 
 /**
- * Extracts a lightweight JPEG Base64 thumbnail from the first decoded frame of a video.
+ * Extracts a lightweight JPEG Base64 thumbnail from the first decoded frame of a video Blob or URL.
  * Uses a temporary Blob URL and cleans it up immediately after capture.
  */
-export async function createVideoThumbnail(videoSrc: string, maxDim: number = 480): Promise<string | null> {
+export async function createVideoThumbnail(videoSrc: string | Blob, maxDim: number = 480): Promise<string | null> {
   if (!videoSrc) return null;
 
   let tempBlobUrl: string | null = null;
-  let effectiveSrc = videoSrc;
+  let effectiveSrc = '';
 
-  if (videoSrc.startsWith('data:')) {
+  if (videoSrc instanceof Blob) {
+    tempBlobUrl = URL.createObjectURL(videoSrc);
+    effectiveSrc = tempBlobUrl;
+  } else if (videoSrc.startsWith('data:')) {
     const blob = dataUrlToBlob(videoSrc);
     if (blob) {
       tempBlobUrl = URL.createObjectURL(blob);
       effectiveSrc = tempBlobUrl;
+    } else {
+      effectiveSrc = videoSrc;
     }
+  } else {
+    effectiveSrc = videoSrc;
   }
 
   return new Promise((resolve) => {

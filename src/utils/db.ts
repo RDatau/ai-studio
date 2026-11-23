@@ -59,3 +59,16 @@ export const clearHistory = async () => {
     request.onerror = () => reject(request.error);
   });
 };
+
+export const requestPersistentStorage = async (): Promise<boolean> => {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
+      const alreadyPersisted = await navigator.storage.persisted?.();
+      if (alreadyPersisted) return true;
+      return await navigator.storage.persist();
+    }
+  } catch (err) {
+    console.warn('Persistent storage request failed:', err);
+  }
+  return false;
+};

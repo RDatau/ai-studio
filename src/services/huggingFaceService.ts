@@ -147,42 +147,91 @@ const rotateToken = (tokens: string[], onStatus?: (status: string) => void): str
   return nextTok;
 };
 
+export const fetchUrlToBlob = async (url: string, token?: string): Promise<Blob> => {
+  if (!url) {
+    throw new Error('Media URL is empty');
+  }
+
+  if (url.startsWith('data:')) {
+    const resp = await fetch(url);
+    const blob = await resp.blob();
+    if (!blob || blob.size === 0) throw new Error('Empty data URL blob');
+    return blob;
+  }
+
+  const targetUrl = url.replace(/^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?/i, '');
+  const altUrl = targetUrl.includes('/file=')
+    ? (targetUrl.includes('/gradio_api/file=')
+        ? targetUrl.replace('/gradio_api/file=', '/file=')
+        : targetUrl.replace('/file=', '/gradio_api/file='))
+    : null;
+
+  const candidates: Array<{ reqUrl: string; useToken: boolean }> = [];
+  if (token) {
+    candidates.push({ reqUrl: targetUrl, useToken: true });
+    if (altUrl) candidates.push({ reqUrl: altUrl, useToken: true });
+  }
+  candidates.push({ reqUrl: targetUrl, useToken: false });
+  if (altUrl) candidates.push({ reqUrl: altUrl, useToken: false });
+
+  let lastError: Error | null = null;
+
+  for (const candidate of candidates) {
+    try {
+      const headers: Record<string, string> = {};
+      if (candidate.useToken && token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const resp = await proxyFetch(candidate.reqUrl, { headers });
+      if (!resp.ok) {
+        lastError = new Error(`HTTP ${resp.status} while downloading ${candidate.reqUrl}`);
+        continue;
+      }
+
+      const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+      if (contentType.includes('text/html') || contentType.includes('application/json')) {
+        lastError = new Error(`Unexpected response type "${contentType}" instead of media file`);
+        continue;
+      }
+
+      let blob = await resp.blob();
+      if (!blob || blob.size < 100) {
+        lastError = new Error(`Downloaded media file is empty or too small (${blob?.size || 0} bytes)`);
+        continue;
+      }
+
+      const isVideo =
+        targetUrl.toLowerCase().includes('.mp4') ||
+        targetUrl.toLowerCase().includes('.webm') ||
+        targetUrl.toLowerCase().includes('video') ||
+        contentType.includes('video');
+
+      if (isVideo && (!blob.type || blob.type === 'application/octet-stream' || blob.type === 'binary/octet-stream')) {
+        blob = new Blob([blob], { type: 'video/mp4' });
+      }
+
+      return blob;
+    } catch (err: any) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  throw lastError || new Error(`Failed to fetch media from ${targetUrl}`);
+};
+
 export const fetchUrlToDataUrl = async (url: string, token?: string): Promise<string> => {
   if (!url) return '';
   if (url.startsWith('data:')) return url;
-  const targetUrl = url.replace(/^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?/i, '');
-  const headers: Record<string, string> = {};
-  if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  let resp = await proxyFetch(targetUrl, { headers });
-  if (!resp.ok && targetUrl.includes('/file=')) {
-    const altUrl = targetUrl.includes('/gradio_api/file=')
-      ? targetUrl.replace('/gradio_api/file=', '/file=')
-      : targetUrl.replace('/file=', '/gradio_api/file=');
-    try {
-      const altResp = await proxyFetch(altUrl, { headers });
-      if (altResp.ok) resp = altResp;
-    } catch {}
-  }
-
-  if (!resp.ok) {
-    throw new Error(`Failed to fetch media from ${targetUrl}`);
-  }
-
-  let blob = await resp.blob();
-
-  // If fetching an MP4 video or media where MIME type is missing/generic
-  const isVideo = targetUrl.toLowerCase().includes('.mp4') || targetUrl.toLowerCase().includes('video') || (resp.headers.get('content-type') || '').includes('video');
-  if (isVideo && (!blob.type || blob.type === 'application/octet-stream' || blob.type === 'binary/octet-stream')) {
-    blob = new Blob([blob], { type: 'video/mp4' });
-  }
+  const blob = await fetchUrlToBlob(url, token);
 
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
       let res = reader.result as string;
-      if (isVideo && res && res.startsWith('data:application/octet-stream;')) {
-        res = res.replace('data:application/octet-stream;', 'data:video/mp4;');
+      if (blob.type.startsWith('video/') && res && res.startsWith('data:application/octet-stream;')) {
+        res = res.replace('data:application/octet-stream;', `data:${blob.type};`);
       }
       resolve(res);
     };

@@ -3,9 +3,9 @@ import { Download, X, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 import { useBlobMediaUrl } from '../utils/mediaBlobUrl';
 
 interface ImageViewerModalProps {
-  media: { url: string; type: 'image' | 'video' } | null;
+  media: { url?: string; blob?: Blob; type: 'image' | 'video' } | null;
   onClose: () => void;
-  onDownload: (url: string, type: 'image' | 'video') => void;
+  onDownload: (url: string | undefined, type: 'image' | 'video', index?: number, blob?: Blob) => void;
 }
 
 export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
@@ -21,7 +21,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const resolvedVideoUrl = useBlobMediaUrl(
-    media?.type === 'video' ? media.url : null,
+    media?.type === 'video' ? (media.blob || media.url) : null,
     Boolean(media && media.type === 'video')
   );
 
@@ -29,7 +29,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
   useEffect(() => {
     setScale(1);
     setPosition({ x: 0, y: 0 });
-  }, [media?.url]);
+  }, [media?.url, media?.blob]);
 
   const handleZoom = (delta: number) => {
     setScale(prev => {
@@ -209,7 +209,7 @@ export const ImageViewerModal: React.FC<ImageViewerModalProps> = ({
       {/* Top Right Action Buttons (Download & Close) */}
       <div className="absolute top-4 right-4 flex items-center space-x-2 sm:space-x-3 z-20">
         <button
-          onClick={() => onDownload(media.url, media.type)}
+          onClick={() => onDownload(media.url, media.type, undefined, media.blob)}
           className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs sm:text-sm font-semibold rounded-xl flex items-center space-x-2 shadow-lg transition active:scale-95"
         >
           <Download className="h-4 w-4" />

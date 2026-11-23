@@ -1,5 +1,5 @@
 import { Client } from '@gradio/client';
-import { fetchUrlToDataUrl } from './huggingFaceService';
+import { fetchUrlToBlob } from './huggingFaceService';
 
 export interface LtxClientParams {
   startImage: string;
@@ -16,7 +16,13 @@ export interface LtxClientParams {
   onStatusUpdate?: (status: string) => void;
 }
 
-export async function generateLtxVideoClientSide(params: LtxClientParams): Promise<{ videoUrl: string; usedIndex: number }> {
+export async function generateLtxVideoClientSide(params: LtxClientParams): Promise<{
+  videoUrl: string;
+  videoBlob?: Blob;
+  downloadError?: string;
+  usedIndex: number;
+  usedToken?: string;
+}> {
   const {
     startImage,
     prompt,
@@ -110,7 +116,11 @@ export async function generateLtxVideoClientSide(params: LtxClientParams): Promi
         throw new Error("Space tidak mengembalikan data video.");
       }
 
-      let videoUrl = outputData[0]?.url || outputData[0]?.path;
+      let videoUrl =
+        outputData[0]?.url ||
+        outputData[0]?.path ||
+        outputData[0]?.video?.url ||
+        outputData[0]?.video?.path;
       if (!videoUrl) {
         throw new Error("URL video tidak ditemukan dalam respons Space.");
       }
@@ -120,18 +130,27 @@ export async function generateLtxVideoClientSide(params: LtxClientParams): Promi
         videoUrl = `${spaceHost}${videoUrl}`;
       }
 
-      onStatusUpdate?.("Mengunduh & mengonversi video ke Base64 MP4 permanen...");
-      try {
-        const base64Video = await fetchUrlToDataUrl(videoUrl, token);
-        if (base64Video && base64Video.startsWith('data:')) {
-          videoUrl = base64Video;
+      onStatusUpdate?.("Mengunduh video MP4 ke penyimpanan biner permanen...");
+      let videoBlob: Blob | undefined;
+      let downloadError: string | undefined;
+
+      for (let dlAttempt = 1; dlAttempt <= 3; dlAttempt++) {
+        try {
+          videoBlob = await fetchUrlToBlob(videoUrl, token);
+          downloadError = undefined;
+          break;
+        } catch (convErr: any) {
+          downloadError = convErr?.message || String(convErr);
+          console.warn(`Percobaan unduh MP4 #${dlAttempt} gagal:`, downloadError);
+          if (dlAttempt < 3) {
+            onStatusUpdate?.(`Mengunduh ulang video MP4 (percobaan ${dlAttempt + 1}/3)...`);
+            await new Promise(r => setTimeout(r, 1200));
+          }
         }
-      } catch (convErr) {
-        console.warn("Gagal mengonversi video ke Base64 MP4:", convErr);
       }
 
-      onStatusUpdate?.("Video berhasil dirender!");
-      return { videoUrl, usedIndex: i };
+      onStatusUpdate?.(videoBlob ? "Video berhasil diunduh & siap disimpan permanen!" : "Video selesai dirender, tetapi gagal mengunduh salinan offline.");
+      return { videoUrl, videoBlob, downloadError, usedIndex: i, usedToken: token };
 
     } catch (e: any) {
       console.warn(`Token #${i + 1} gagal:`, e.message || e);

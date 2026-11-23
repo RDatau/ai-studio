@@ -41,14 +41,15 @@ import {
   addDerivedConditioningClientSide,
 } from './services/qwenClientService';
 import { generateLtxVideoClientSide } from './services/ltxClientService';
-import { fetchUrlToDataUrl } from './services/huggingFaceService';
-import { useBlobMediaUrl, createVideoThumbnail, compressImageToThumbnail } from './utils/mediaBlobUrl';
+import { fetchUrlToBlob } from './services/huggingFaceService';
+import { useBlobMediaUrl, createVideoThumbnail, compressImageToThumbnail, dataUrlToBlob } from './utils/mediaBlobUrl';
 
 interface GenerationHistoryItem {
   id: string;
   type: 'generate' | 'edit' | 'video';
   imageUrl?: string;
   videoUrl?: string;
+  videoBlob?: Blob;
   thumbnailUrl?: string;
   prompt: string;
   seed: number;
@@ -104,7 +105,7 @@ export default function App() {
   // Navigation & Modal state
   const [activeTab, setActiveTab] = useState<'generate' | 'edit' | 'video' | 'gallery'>('generate');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [fullScreenMedia, setFullScreenMedia] = useState<{ url: string; type: 'image' | 'video' } | null>(null);
+  const [fullScreenMedia, setFullScreenMedia] = useState<{ url?: string; blob?: Blob; type: 'image' | 'video' } | null>(null);
   const [editSpace, setEditSpace] = useState('rdata92/qwen-image-21-uncensored');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isSelectMode, setIsSelectMode] = useState(false);
@@ -197,7 +198,16 @@ export default function App() {
   const [vidMidKfEnabled, setVidMidKfEnabled] = useState<boolean>(false);
   const [vidMidKf1Image, setVidMidKf1Image] = useState<string | null>(null);
   const [vidMidKf1Pos, setVidMidKf1Pos] = useState<number>(50);
-  const [currentVideoResult, setCurrentVideoResult] = useState<{ videoUrl: string; seed: number; usedTokenMasked: string } | null>(null);
+  const [currentVideoResult, setCurrentVideoResult] = useState<{
+    videoUrl?: string;
+    videoBlob?: Blob;
+    seed: number;
+    usedTokenMasked: string;
+    usedToken?: string;
+    saveError?: string;
+    prompt?: string;
+  } | null>(null);
+  const [isRetryingVideoSave, setIsRetryingVideoSave] = useState(false);
 
   // Output & Loading state
   const [isLoading, setIsLoading] = useState(false);
@@ -209,7 +219,7 @@ export default function App() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const resolvedCurrentVideoUrl = useBlobMediaUrl(
-    currentVideoResult?.videoUrl,
+    currentVideoResult?.videoBlob || currentVideoResult?.videoUrl,
     activeTab === 'video' && Boolean(currentVideoResult)
   );
 
@@ -221,6 +231,22 @@ export default function App() {
         import('./utils/db').then(({ addHistoryItem }) => addHistoryItem(updatedItem)).catch(() => {});
       }
       return prev.map(item => (item.id === id && !item.thumbnailUrl ? { ...item, thumbnailUrl } : item));
+    });
+  }, []);
+
+  const handleVideoBlobRecovered = useCallback(async (id: string, videoBlob: Blob) => {
+    setHistory(prev => {
+      const target = prev.find(item => item.id === id);
+      if (target && !target.videoBlob) {
+        const updatedItem: GenerationHistoryItem = {
+          ...target,
+          videoBlob,
+          videoUrl: undefined,
+        };
+        import('./utils/db').then(({ addHistoryItem }) => addHistoryItem(updatedItem)).catch(() => {});
+        return prev.map(item => (item.id === id ? updatedItem : item));
+      }
+      return prev;
     });
   }, []);
 
@@ -238,7 +264,8 @@ export default function App() {
       setGeminiKeyInputText(savedGeminiKeys);
     }
     
-    import('./utils/db').then(async ({ getHistory }) => {
+    import('./utils/db').then(async ({ getHistory, requestPersistentStorage }) => {
+      requestPersistentStorage().catch(() => {});
       try {
         const savedHistory = await getHistory();
         if (savedHistory && savedHistory.length > 0) {
@@ -612,47 +639,102 @@ export default function App() {
         localStorage.setItem('video_token_last_working_index', result.usedIndex.toString());
       }
 
-      let videoDataUrl = result.videoUrl;
-      if (!videoDataUrl.startsWith('data:')) {
-        setLoadingMessage('Menyimpan video ke penyimpanan permanen...');
-        try {
-          videoDataUrl = await fetchUrlToDataUrl(result.videoUrl);
-        } catch (e) {
-          console.warn("Failed to convert video to base64, storing URL instead:", e);
+      const usedTokenMasked = result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous';
+      let videoBlob = result.videoBlob;
+      let saveError = result.downloadError;
+
+      if (!videoBlob && result.videoUrl) {
+        if (result.videoUrl.startsWith('data:')) {
+          videoBlob = dataUrlToBlob(result.videoUrl) || undefined;
+        } else {
+          setLoadingMessage('Menyimpan video MP4 ke Blob biner IndexedDB...');
+          try {
+            videoBlob = await fetchUrlToBlob(result.videoUrl, result.usedToken);
+            saveError = undefined;
+          } catch (e: any) {
+            saveError = e?.message || 'Gagal mengunduh file MP4 permanen dari server Gradio.';
+            console.warn('Video download to Blob failed:', saveError);
+          }
         }
       }
 
-      const thumbnailUrl =
-        (await createVideoThumbnail(videoDataUrl)) ||
-        (await compressImageToThumbnail(vidImage)) ||
-        undefined;
+      if (videoBlob) {
+        const thumbnailUrl =
+          (await createVideoThumbnail(videoBlob)) ||
+          (await compressImageToThumbnail(vidImage)) ||
+          undefined;
 
-      const resultObj = {
-        videoUrl: videoDataUrl,
-        seed: vidSeed || -1,
-        usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
-      };
-      setCurrentVideoResult(resultObj);
+        setCurrentVideoResult({
+          videoBlob,
+          seed: vidSeed || -1,
+          usedTokenMasked,
+        });
 
-      const historyItem: GenerationHistoryItem = {
-        id: Math.random().toString(36).substring(2, 9),
-        type: 'video',
-        videoUrl: videoDataUrl,
-        thumbnailUrl,
-        prompt: vidPrompt,
-        seed: vidSeed || -1,
-        timestamp: new Date().toISOString(),
-        usedTokenMasked: result.usedIndex !== undefined ? `Token #${Number(result.usedIndex) + 1}` : 'Anonymous'
-      };
-      
-      const { addHistoryItem } = await import('./utils/db');
-      await addHistoryItem(historyItem);
-      setHistory(prev => [historyItem, ...prev]);
+        const historyItem: GenerationHistoryItem = {
+          id: Math.random().toString(36).substring(2, 9),
+          type: 'video',
+          videoBlob,
+          thumbnailUrl,
+          prompt: vidPrompt,
+          seed: vidSeed || -1,
+          timestamp: new Date().toISOString(),
+          usedTokenMasked,
+        };
+
+        const { addHistoryItem } = await import('./utils/db');
+        await addHistoryItem(historyItem);
+        setHistory(prev => [historyItem, ...prev]);
+      } else {
+        setCurrentVideoResult({
+          videoUrl: result.videoUrl,
+          seed: vidSeed || -1,
+          usedTokenMasked,
+          usedToken: result.usedToken,
+          saveError: saveError || 'Video gagal diunduh sebagai Blob permanen sehingga belum disimpan ke Gallery.',
+          prompt: vidPrompt,
+        });
+      }
     } catch (err: any) {
       alert(`Error: ${err.message || 'Failed to generate video'}`);
     } finally {
       setIsLoading(false);
       setLoadingMessage('');
+    }
+  };
+
+  const handleRetrySaveVideoOffline = async () => {
+    if (!currentVideoResult?.videoUrl || currentVideoResult.videoBlob) return;
+    setIsRetryingVideoSave(true);
+    try {
+      const videoBlob = await fetchUrlToBlob(currentVideoResult.videoUrl, currentVideoResult.usedToken);
+      const thumbnailUrl =
+        (await createVideoThumbnail(videoBlob)) ||
+        (vidImage ? await compressImageToThumbnail(vidImage) : null) ||
+        undefined;
+
+      const historyItem: GenerationHistoryItem = {
+        id: Math.random().toString(36).substring(2, 9),
+        type: 'video',
+        videoBlob,
+        thumbnailUrl,
+        prompt: currentVideoResult.prompt || vidPrompt || 'LTX Video',
+        seed: currentVideoResult.seed,
+        timestamp: new Date().toISOString(),
+        usedTokenMasked: currentVideoResult.usedTokenMasked,
+      };
+
+      const { addHistoryItem } = await import('./utils/db');
+      await addHistoryItem(historyItem);
+      setHistory(prev => [historyItem, ...prev]);
+      setCurrentVideoResult({
+        videoBlob,
+        seed: currentVideoResult.seed,
+        usedTokenMasked: currentVideoResult.usedTokenMasked,
+      });
+    } catch (err: any) {
+      alert(`Masih gagal mengunduh video permanen: ${err?.message || 'Error'}`);
+    } finally {
+      setIsRetryingVideoSave(false);
     }
   };
 
@@ -689,7 +771,7 @@ export default function App() {
     }
   };
 
-  const downloadMedia = (url: string, type: 'image' | 'video', index?: number) => {
+  const downloadMedia = (url: string | undefined, type: 'image' | 'video', index?: number, blob?: Blob) => {
     const now = new Date();
     const day = String(now.getDate()).padStart(2, '0');
     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -701,6 +783,20 @@ export default function App() {
     const seqNum = String(index !== undefined ? index + 1 : Math.max(1, history.length)).padStart(3, '0');
     const ext = type === 'video' ? 'mp4' : 'png';
     const filename = `${type === 'video' ? 'video' : 'image'}-${day}-${month}-${year}_${hours}-${minutes}-${seconds}-${seqNum}.${ext}`;
+
+    if (blob) {
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      return;
+    }
+
+    if (!url) return;
 
     if (url.startsWith('data:')) {
       const a = document.createElement('a');
@@ -714,15 +810,15 @@ export default function App() {
 
     fetch(url)
       .then(res => res.blob())
-      .then(blob => {
-        const blobUrl = URL.createObjectURL(blob);
+      .then(fetchedBlob => {
+        const blobUrl = URL.createObjectURL(fetchedBlob);
         const a = document.createElement('a');
         a.href = blobUrl;
         a.download = filename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
       })
       .catch(() => {
         const a = document.createElement('a');
@@ -991,10 +1087,12 @@ export default function App() {
                       {item.type === 'video' ? (
                         <GalleryVideoPreview
                           id={item.id}
+                          videoBlob={item.videoBlob}
                           videoUrl={item.videoUrl}
                           thumbnailUrl={item.thumbnailUrl}
                           prompt={item.prompt}
                           onThumbnailGenerated={handleVideoThumbnailGenerated}
+                          onVideoBlobRecovered={handleVideoBlobRecovered}
                         />
                       ) : (
                         <img src={item.imageUrl} alt={item.prompt} className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
@@ -1045,7 +1143,7 @@ export default function App() {
                       <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent opacity-100 sm:opacity-0 group-hover:opacity-100 transition flex items-end p-4 z-40 pointer-events-none">
                         <div className="flex space-x-2 w-full pointer-events-auto">
                           <button
-                            onClick={() => downloadMedia(item.type === 'video' ? item.videoUrl! : item.imageUrl!, item.type === 'video' ? 'video' : 'image', index)}
+                            onClick={() => downloadMedia(item.type === 'video' ? item.videoUrl : item.imageUrl, item.type === 'video' ? 'video' : 'image', index, item.videoBlob)}
                             className="flex-1 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold flex items-center justify-center space-x-1 transition shadow"
                           >
                             <Download className="h-3.5 w-3.5" />
@@ -1076,7 +1174,11 @@ export default function App() {
                             <Film className="h-3.5 w-3.5" />
                           </button>
                           <button
-                            onClick={() => setFullScreenMedia({ url: item.type === 'video' ? item.videoUrl! : item.imageUrl!, type: item.type === 'video' ? 'video' : 'image' })}
+                            onClick={() => setFullScreenMedia({
+                              url: item.type === 'video' ? item.videoUrl : item.imageUrl,
+                              blob: item.videoBlob,
+                              type: item.type === 'video' ? 'video' : 'image',
+                            })}
                             className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition"
                           >
                             <Maximize2 className="h-3.5 w-3.5" />
@@ -1658,7 +1760,11 @@ export default function App() {
                       />
                       <div className="absolute top-4 right-4 flex space-x-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition">
                         <button
-                          onClick={() => setFullScreenMedia({ url: currentVideoResult.videoUrl, type: 'video' })}
+                          onClick={() => setFullScreenMedia({
+                            url: currentVideoResult.videoUrl,
+                            blob: currentVideoResult.videoBlob,
+                            type: 'video',
+                          })}
                           className="p-2.5 bg-slate-900/80 hover:bg-slate-900 text-white rounded-xl backdrop-blur transition shadow-lg"
                         >
                           <Maximize2 className="h-4 w-4" />
@@ -1666,13 +1772,33 @@ export default function App() {
                       </div>
                     </div>
 
+                    {currentVideoResult.saveError && !currentVideoResult.videoBlob && (
+                      <div className="bg-amber-950/60 border border-amber-500/40 rounded-xl p-3.5 text-xs text-amber-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <div className="font-semibold text-amber-300 flex items-center space-x-1.5">
+                            <AlertCircle className="h-4 w-4 shrink-0" />
+                            <span>Video belum tersimpan offline ke Gallery</span>
+                          </div>
+                          <p className="text-amber-200/80">{currentVideoResult.saveError}</p>
+                        </div>
+                        <button
+                          onClick={handleRetrySaveVideoOffline}
+                          disabled={isRetryingVideoSave}
+                          className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-semibold rounded-lg transition shrink-0 flex items-center justify-center space-x-1.5"
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${isRetryingVideoSave ? 'animate-spin' : ''}`} />
+                          <span>{isRetryingVideoSave ? 'Menyimpan...' : 'Simpan Permanen ke Gallery'}</span>
+                        </button>
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between bg-slate-950 p-4 rounded-xl border border-slate-800/80 text-xs">
                       <div className="space-y-1">
                         <div className="text-slate-400">Used Seed: <span className="text-pink-300 font-mono font-semibold">{currentVideoResult.seed}</span></div>
                         <div className="text-slate-400">HF Token Used: <span className="text-slate-200 font-mono">{currentVideoResult.usedTokenMasked}</span></div>
                       </div>
                       <button
-                        onClick={() => downloadMedia(currentVideoResult.videoUrl, 'video')}
+                        onClick={() => downloadMedia(currentVideoResult.videoUrl, 'video', undefined, currentVideoResult.videoBlob)}
                         className="px-4 py-2 bg-pink-600 hover:bg-pink-500 text-white font-semibold rounded-lg transition flex items-center space-x-1.5 shadow active:scale-95"
                       >
                         <Download className="h-4 w-4" />
