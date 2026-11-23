@@ -43,6 +43,7 @@ import {
 import { generateLtxVideoClientSide } from './services/ltxClientService';
 import { fetchUrlToBlob } from './services/huggingFaceService';
 import { useBlobMediaUrl, createVideoThumbnail, compressImageToThumbnail, dataUrlToBlob } from './utils/mediaBlobUrl';
+import { DEFAULT_GEMINI_MODEL, GEMINI_MODEL_OPTIONS } from './constants/geminiModels';
 
 interface GenerationHistoryItem {
   id: string;
@@ -125,13 +126,69 @@ export default function App() {
   const [testingTokenIdx, setTestingTokenIdx] = useState<number | null>(null);
   const [testingAll, setTestingAll] = useState(false);
 
-  // Gemini API Key state
+  // Gemini API Key & Model state
   const [geminiKeyInputText, setGeminiKeyInputText] = useState<string>('');
+  const [geminiModel, setGeminiModel] = useState<string>(DEFAULT_GEMINI_MODEL);
+  const [isCustomGeminiModel, setIsCustomGeminiModel] = useState<boolean>(false);
+  const [testingGemini, setTestingGemini] = useState(false);
+  const [geminiTestResult, setGeminiTestResult] = useState<{ valid: boolean; message: string } | null>(null);
 
   const handleGeminiKeyTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setGeminiKeyInputText(val);
+    setGeminiTestResult(null);
     localStorage.setItem('qwen_gemini_keys', val);
+  };
+
+  const handleGeminiModelSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setGeminiTestResult(null);
+    if (val === '__custom__') {
+      setIsCustomGeminiModel(true);
+      return;
+    }
+    setIsCustomGeminiModel(false);
+    setGeminiModel(val);
+    localStorage.setItem('qwen_gemini_model', val);
+  };
+
+  const handleCustomGeminiModelChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setGeminiModel(val);
+    setGeminiTestResult(null);
+    localStorage.setItem('qwen_gemini_model', val.trim() || DEFAULT_GEMINI_MODEL);
+  };
+
+  const testGeminiKeys = async () => {
+    const keyStr = geminiKeyInputText.trim() ? geminiKeyInputText : (localStorage.getItem('qwen_gemini_keys') || '');
+    if (!keyStr.trim()) {
+      setGeminiTestResult({ valid: false, message: 'Masukkan minimal 1 Gemini API Key terlebih dahulu.' });
+      return;
+    }
+    setTestingGemini(true);
+    setGeminiTestResult(null);
+    try {
+      const res = await fetch('/api/validate-gemini-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiKey: keyStr,
+          model: geminiModel.trim() || DEFAULT_GEMINI_MODEL,
+        }),
+      });
+      const data = await res.json();
+      setGeminiTestResult({
+        valid: Boolean(data.valid),
+        message: data.message || (data.valid ? 'API Key valid!' : 'Validasi gagal.'),
+      });
+    } catch (err: any) {
+      setGeminiTestResult({
+        valid: false,
+        message: err?.message || 'Gagal menghubungi server validasi.',
+      });
+    } finally {
+      setTestingGemini(false);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => e.preventDefault();
@@ -263,6 +320,15 @@ export default function App() {
     if (savedGeminiKeys) {
       setGeminiKeyInputText(savedGeminiKeys);
     }
+
+    const savedGeminiModel = localStorage.getItem('qwen_gemini_model');
+    if (savedGeminiModel && savedGeminiModel.trim()) {
+      const trimmedModel = savedGeminiModel.trim();
+      setGeminiModel(trimmedModel);
+      if (!GEMINI_MODEL_OPTIONS.some(opt => opt.id === trimmedModel)) {
+        setIsCustomGeminiModel(true);
+      }
+    }
     
     import('./utils/db').then(async ({ getHistory, requestPersistentStorage }) => {
       requestPersistentStorage().catch(() => {});
@@ -356,6 +422,8 @@ export default function App() {
       
       const image = isVideo ? vidImage : (isEdit ? mainImage : null);
       
+      const activeGeminiModel = geminiModel.trim() || DEFAULT_GEMINI_MODEL;
+
       const res = await fetch('/api/enhance-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -364,21 +432,29 @@ export default function App() {
           keys, 
           lastWorkingIndex, 
           image, 
-          mode: isVideo ? 'video' : (isEdit ? 'edit' : 'generate') 
+          mode: isVideo ? 'video' : (isEdit ? 'edit' : 'generate'),
+          model: activeGeminiModel,
         })
       });
       const text = await res.text();
-      if (!res.ok) {
-        throw new Error(`Server returned ${res.status}: ${text.substring(0, 50)}...`);
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = null;
       }
-      const data = JSON.parse(text);
+      if (!res.ok) {
+        throw new Error(parsed?.error || `Server returned ${res.status}: ${text.substring(0, 120)}`);
+      }
+      const data = parsed ?? {};
       if (!data.success && data.error) {
         alert(data.error);
         return;
       }
       if (data.enhanced) {
-        if (data.usedIndex !== undefined) {
-          localStorage.setItem('gemini_last_working_index', data.usedIndex.toString());
+        const resolvedIdx = data.usedIndex ?? data.usedKeyIndex;
+        if (resolvedIdx !== undefined) {
+          localStorage.setItem('gemini_last_working_index', resolvedIdx.toString());
         }
         if (isVideo) setVidPrompt(data.enhanced);
         else if (isEdit) setEditPrompt(data.enhanced);
@@ -1980,20 +2056,83 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="border-t border-slate-800 pt-4">
-                <label className="text-sm font-medium text-slate-200 block mb-1">
-                  Gemini API Keys (One per line / Press Enter)
-                </label>
-                <p className="text-xs text-slate-400 mb-2">
-                  Used for AI Prompt Enhancement. Keys are automatically rotated (cycled) if rate limits or quota errors occur.
-                </p>
-                <textarea
-                  rows={3}
-                  value={geminiKeyInputText}
-                  onChange={handleGeminiKeyTextChange}
-                  placeholder="AIzaSy...&#10;AIzaSy..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-sm font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-purple-500 transition resize-none"
-                />
+              <div className="border-t border-slate-800 pt-4 space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-slate-200 block mb-1">
+                    Gemini Model (Prompt Enhance)
+                  </label>
+                  <p className="text-xs text-slate-400 mb-2">
+                    Select the Gemini model used for AI Prompt Enhancement across Generate, Edit, and Video tabs.
+                  </p>
+                  <select
+                    value={isCustomGeminiModel ? '__custom__' : (GEMINI_MODEL_OPTIONS.some(opt => opt.id === geminiModel) ? geminiModel : '__custom__')}
+                    onChange={handleGeminiModelSelectChange}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-purple-500 transition"
+                  >
+                    {GEMINI_MODEL_OPTIONS.map((opt) => (
+                      <option key={opt.id} value={opt.id}>
+                        {opt.label} ({opt.id})
+                      </option>
+                    ))}
+                    <option value="__custom__">Custom Model ID (Ketik Manual)...</option>
+                  </select>
+                  {isCustomGeminiModel ? (
+                    <input
+                      type="text"
+                      value={geminiModel}
+                      onChange={handleCustomGeminiModelChange}
+                      placeholder="Contoh: gemini-3.5-flash-lite"
+                      className="mt-2 w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-purple-500 transition"
+                    />
+                  ) : (
+                    <p className="mt-1.5 text-[11px] text-slate-400">
+                      {GEMINI_MODEL_OPTIONS.find(opt => opt.id === geminiModel)?.description || `Active model: ${geminiModel}`}
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <label className="text-sm font-medium text-slate-200 block">
+                      Gemini API Keys (One per line / Press Enter)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={testGeminiKeys}
+                      disabled={testingGemini}
+                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition shrink-0"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${testingGemini ? 'animate-spin' : ''}`} />
+                      <span>{testingGemini ? 'Testing...' : 'Test Gemini Keys'}</span>
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-400 mb-2">
+                    Used for AI Prompt Enhancement. Keys are automatically rotated (cycled) if rate limits or quota errors occur.
+                  </p>
+                  <textarea
+                    rows={3}
+                    value={geminiKeyInputText}
+                    onChange={handleGeminiKeyTextChange}
+                    placeholder="AIzaSy...&#10;AIzaSy..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-sm font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:border-purple-500 transition resize-none"
+                  />
+                  {geminiTestResult && (
+                    <div
+                      className={`mt-2 px-3 py-2 rounded-xl border text-xs flex items-start space-x-2 ${
+                        geminiTestResult.valid
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                          : 'bg-red-500/10 border-red-500/30 text-red-300'
+                      }`}
+                    >
+                      {geminiTestResult.valid ? (
+                        <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
+                      ) : (
+                        <XCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                      )}
+                      <span className="break-words">{geminiTestResult.message}</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

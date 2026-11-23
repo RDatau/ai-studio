@@ -24,8 +24,8 @@ app.post('/api/test-token', async (req, res) => {
 
 app.post('/api/enhance-prompt', async (req, res) => {
   try {
-    const { prompt, keys, image, mode } = req.body;
-    const result = await enhancePrompt(prompt, keys, image, mode);
+    const { prompt, keys, image, mode, model, lastWorkingIndex } = req.body;
+    const result = await enhancePrompt(prompt, keys, image, mode, model, lastWorkingIndex);
     return res.json(result);
   } catch (err: any) {
     console.error('Prompt enhancement error:', err);
@@ -35,8 +35,8 @@ app.post('/api/enhance-prompt', async (req, res) => {
 
 app.post('/api/validate-gemini-key', async (req, res) => {
   try {
-    const { apiKey } = req.body;
-    const result = await validateApiKey(apiKey);
+    const { apiKey, model } = req.body;
+    const result = await validateApiKey(apiKey, model);
     return res.json(result);
   } catch (err: any) {
     return res.status(500).json({ valid: false, message: err.message });
