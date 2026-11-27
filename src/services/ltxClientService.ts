@@ -1,5 +1,9 @@
 import { Client } from '@gradio/client';
 import { fetchUrlToBlob } from './huggingFaceService';
+import {
+  DEFAULT_LTX_AUDIO_SETTINGS,
+  LtxAudioSettingsState,
+} from '../components/LtxAudioControls';
 
 export interface LtxClientParams {
   startImage: string;
@@ -13,6 +17,7 @@ export interface LtxClientParams {
   kfMidEnabled?: boolean;
   kfMid1Image?: string | null;
   kfMid1Pos?: number;
+  audioSettings?: LtxAudioSettingsState;
   onStatusUpdate?: (status: string) => void;
 }
 
@@ -35,8 +40,11 @@ export async function generateLtxVideoClientSide(params: LtxClientParams): Promi
     kfMidEnabled = false,
     kfMid1Image,
     kfMid1Pos = 50,
+    audioSettings,
     onStatusUpdate
   } = params;
+
+  const audio: LtxAudioSettingsState = audioSettings ?? DEFAULT_LTX_AUDIO_SETTINGS;
 
   if (!startImage) {
     throw new Error("Start Frame diperlukan untuk LTX 2.3.");
@@ -108,7 +116,24 @@ export async function generateLtxVideoClientSide(params: LtxClientParams): Promi
         profile_name: "",
         kv_enabled: false,
         kv_strength: 1.0,
-        audio_ref_enabled: false,
+        audio_ref_enabled: Boolean(audio.audioRefEnabled),
+        audio_ref_file: audio.audioRefEnabled && audio.audioRefFile ? audio.audioRefFile : null,
+        audio_ref_guidance_scale: Number.isFinite(audio.audioRefGuidanceScale) ? audio.audioRefGuidanceScale : 3.0,
+        audio_ref_stem_sep: Boolean(audio.audioRefStemSep),
+        audio_ref_normalize: Boolean(audio.audioRefNormalize),
+        sulphur_audio_strength: Number(audio.sulphurAudioStrength ?? 0.15),
+        sulphur_v1_audio_strength: Number(audio.sulphurV1AudioStrength ?? 0.15),
+        vbvr_audio_strength: Number(audio.vbvrAudioStrength ?? 0.5),
+        dreamly_audio_strength: Number(audio.dreamlyAudioStrength ?? 0.6),
+        synth_audio_strength: Number(audio.synthAudioStrength ?? 0.0),
+        plora_audio_strength: Number(audio.ploraAudioStrength ?? 0.0),
+        singularity_audio_strength: Number(audio.singularityAudioStrength ?? 0.3),
+        omninft_audio_strength: Number(audio.omninftAudioStrength ?? 0.8),
+        omninft_bf16_audio_strength: Number(audio.omninftBf16AudioStrength ?? 0.0),
+        better_motion_audio_strength: Number(audio.betterMotionAudioStrength ?? 0.0),
+        physics_v2_audio_strength: Number(audio.physicsV2AudioStrength ?? 0.0),
+        hardcut_audio_strength: Number(audio.hardcutAudioStrength ?? 0.0),
+        transition_audio_strength: Number(audio.transitionAudioStrength ?? 0.0),
       });
 
       const outputData = response.data as any[];

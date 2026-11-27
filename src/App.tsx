@@ -35,6 +35,11 @@ import {
   DEFAULT_RAPID_AIO_SETTINGS,
   RapidAioSettingsState,
 } from './components/RapidAioControls';
+import {
+  LtxAudioControls,
+  DEFAULT_LTX_AUDIO_SETTINGS,
+  LtxAudioSettingsState,
+} from './components/LtxAudioControls';
 import { generateQwenImageClientSide as generateQwenImageT2I } from './services/qwenGenerateClientService';
 import {
   generateQwenImageClientSide as generateQwenImageI2I,
@@ -255,6 +260,7 @@ export default function App() {
   const [vidMidKfEnabled, setVidMidKfEnabled] = useState<boolean>(false);
   const [vidMidKf1Image, setVidMidKf1Image] = useState<string | null>(null);
   const [vidMidKf1Pos, setVidMidKf1Pos] = useState<number>(50);
+  const [vidAudioSettings, setVidAudioSettings] = useState<LtxAudioSettingsState>(DEFAULT_LTX_AUDIO_SETTINGS);
   const [currentVideoResult, setCurrentVideoResult] = useState<{
     videoUrl?: string;
     videoBlob?: Blob;
@@ -708,6 +714,7 @@ export default function App() {
         kfMidEnabled: vidMidKfEnabled,
         kfMid1Image: vidMidKf1Image,
         kfMid1Pos: vidMidKf1Pos,
+        audioSettings: vidAudioSettings,
         onStatusUpdate: (status) => setLoadingMessage(status)
       });
 
@@ -1784,6 +1791,11 @@ export default function App() {
                       </div>
                     )}
                   </div>
+
+                  <LtxAudioControls
+                    settings={vidAudioSettings}
+                    onChange={setVidAudioSettings}
+                  />
 
                   <button
                     onClick={handleVideoGenerate}
